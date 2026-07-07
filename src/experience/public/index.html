@@ -1,0 +1,1344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Astra Campaign Studio</title>
+<style>
+  :root {
+    --navy: #0A1628; --navy2: #12233b; --panel: #ffffff; --ink: #1b2430;
+    --muted: #6b7b8c; --line: #e4e9ef; --gold: #B8913B; --red: #d2051e;
+    --green: #1f9d55; --amber: #b7791f; --bg: #eef1f5;
+    --radius: 10px; font-synthesis: none;
+  }
+  * { box-sizing: border-box; }
+  html, body { overflow-x: clip; } /* clips sideways drift without breaking the sticky header */
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--ink); }
+  header {
+    background: var(--navy); color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 14px;
+    position: sticky; top: 0; z-index: 5; flex-wrap: wrap; row-gap: 8px;
+  }
+  header .brand { font-weight: 700; letter-spacing: .04em; }
+  header .brand small { color: var(--gold); font-weight: 600; display: block; font-size: 11px; letter-spacing: .18em; }
+  header select { background: var(--navy2); color: #fff; border: 1px solid #24374f; border-radius: 8px; padding: 7px 10px; font-size: 13px; max-width: 220px; text-overflow: ellipsis; }
+  header select#picker { max-width: 300px; }
+  header select#roleSel { margin-left: auto; max-width: 200px; border-color: var(--gold); color: #ffe9bf; font-weight: 600; }
+  header .rolelabel { color: var(--gold); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  header button.new { background: var(--gold); color: #22160a; border: 0; border-radius: 8px; padding: 8px 12px; font-weight: 600; cursor: pointer; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { background: var(--navy2); border: 1px solid #24374f; color: #cdd8e6; padding: 4px 10px; border-radius: 20px; font-size: 12px; }
+  .pill b { color: #fff; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; padding: 16px 20px; align-items: start; }
+  /* min-width:0 lets grid/flex children shrink below content width so the stage
+     rail scrolls internally instead of forcing the whole page to overflow. */
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+  /* Long tokens (URLs, ids) wrap instead of widening their container. */
+  .rationale, .cite, .why, .fval, .title, code { overflow-wrap: anywhere; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    header { flex-wrap: wrap; row-gap: 8px; }
+  }
+  .card > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .card .pad { padding: 14px; }
+
+  /* stage rail */
+  .rail { display: flex; gap: 6px; overflow-x: auto; padding: 14px; min-width: 0; }
+  .stage { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 120px; background: #f7f9fb; }
+  .stage.done { border-color: #cfe8d8; background: #f0faf4; }
+  .stage.active { border-color: var(--gold); background: #fffaf0; box-shadow: 0 0 0 2px #f4e6c6 inset; }
+  .stage .s-name { font-weight: 600; font-size: 12.5px; }
+  .stage .s-state { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .stage.active .s-state { color: var(--amber); }
+  .stage .gate-ok { color: var(--green); }
+  .stage .gate-miss { color: var(--red); }
+
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
+  .meta div span { color: var(--muted); }
+
+  /* artifacts */
+  .stagegroup h3 { margin: 6px 2px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .art { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 10px; background: #fff; }
+  .art .top { display: flex; align-items: center; gap: 8px; }
+  .art .title { font-weight: 600; }
+  .kind { font-size: 11px; color: var(--muted); background: #f4f6f9; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; }
+  .await { margin-top: 8px; font-size: 12px; color: var(--amber); background: #fdf6e9; border: 1px solid #f0e2c2; border-radius: 7px; padding: 7px 9px; }
+  /* @mentions / hand-offs (§8.4) */
+  .mention { margin-top: 6px; font-size: 12px; background: #f4f0fb; border: 1px solid #e2d9f3; border-radius: 7px; padding: 6px 9px; }
+  .mention.resolved { opacity: .55; }
+  .mention b { color: #5b3d99; }
+  .mentionform { display: flex; gap: 6px; margin-top: 8px; }
+  .mentionform select, .mentionform input { border: 1px solid var(--line); border-radius: 7px; padding: 6px; font-size: 12px; }
+  .mentionform input { flex: 1; }
+  .status { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .status.approved { background: #e7f7ee; color: var(--green); }
+  .status.in-review { background: #fdf3e0; color: var(--amber); }
+  .status.proposed { background: #eef1f5; color: var(--muted); }
+  .status.rejected { background: #fdeaec; color: var(--red); }
+  .status.superseded { background: #f2f2f2; color: #9aa5b1; text-decoration: line-through; }
+  .rationale { font-size: 12.5px; color: #384250; margin: 8px 0; }
+  .linkbtn { background: none; border: 0; color: var(--navy); font-weight: 600; font-size: 12px; cursor: pointer; padding: 2px 0; text-decoration: underline; }
+  .cardlinks { display: flex; gap: 14px; }
+  .bodyview { margin: 6px 0 4px; background: #f7f9fb; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; max-height: 260px; overflow: auto; }
+  .brow { display: grid; grid-template-columns: 130px minmax(0,1fr); gap: 10px; padding: 3px 0; align-items: baseline; }
+  .brow + .brow { border-top: 1px solid #eef1f5; }
+  .bk { color: var(--muted); }
+  .bv { color: var(--ink); overflow-wrap: anywhere; }
+  .blist { margin: 2px 0; padding-left: 16px; }
+  .bmuted { color: #b6bec8; }
+  .ver { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+  /* diff-first editing (§8.4) */
+  .diffview { margin: 6px 0 4px; background: #f7f9fb; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; }
+  .diffview del { background: #fdeaec; color: #8f1d28; text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+  .diffview ins { background: #e7f7ee; color: #14572f; text-decoration: none; border-radius: 3px; padding: 0 2px; }
+  .art.editing { border-color: var(--gold); box-shadow: 0 0 0 2px #f4e6c6 inset; }
+  .editform { margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+  .elabel { font-size: 11px; color: var(--muted); }
+  .etext { width: 100%; border: 1px solid var(--gold); border-radius: 7px; padding: 8px; font-size: 12.5px; font-family: inherit; resize: vertical; min-height: 38px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); }
+  .chip.pass { background: #eefaf2; border-color: #cfe8d8; color: var(--green); }
+  .chip.fail { background: #fdeaec; border-color: #f3c4c9; color: var(--red); }
+  .cite { font-size: 11px; color: var(--muted); }
+  .art .actions { display: flex; gap: 8px; margin-top: 10px; }
+  button.approve { background: var(--green); color: #fff; border: 0; border-radius: 7px; padding: 7px 12px; font-weight: 600; cursor: pointer; }
+  button.reject { background: #fff; color: var(--red); border: 1px solid #f3c4c9; border-radius: 7px; padding: 7px 12px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; cursor: pointer; font-weight: 600; }
+  .bigbtn { background: var(--navy); color: #fff; border: 0; border-radius: 8px; padding: 10px; width: 100%; font-weight: 600; cursor: pointer; }
+  .bigbtn.gold { background: var(--gold); color: #22160a; }
+  .bigbtn:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* figma */
+  .frame { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 12px; padding: 6px 0; border-top: 1px dashed var(--line); }
+  .frame .fname { color: var(--muted); }
+  .frame .fval.empty { color: #b6bec8; font-style: italic; }
+
+  /* generated artwork previews (asset cards + figma frames) */
+  .assetpreview { display: block; max-width: 240px; width: 100%; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 4px rgba(10,22,40,.12); }
+  .assetpreview.big { max-width: 420px; }
+
+  /* activity + chat */
+  .activity { max-height: 320px; overflow-y: auto; }
+  .act { font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .act .who { color: var(--navy); font-weight: 600; }
+  .act .why { color: var(--muted); }
+  .chat .log { max-height: 160px; overflow-y: auto; font-size: 12.5px; }
+  .chat .msg { padding: 6px 9px; border-radius: 8px; margin: 6px 0; }
+  .chat .msg.me { background: #eef2f7; }
+  .chat .msg.astra { background: #fffaf0; border: 1px solid #f0e2c2; }
+  .chat form { display: flex; gap: 6px; margin-top: 8px; }
+  .chat input { flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+  /* view switcher + portfolio */
+  .viewnav { display: flex; background: var(--navy2); border: 1px solid #24374f; border-radius: 8px; overflow: hidden; }
+  .navbtn { background: transparent; color: #cdd8e6; border: 0; padding: 7px 13px; font-size: 12.5px; cursor: pointer; font-weight: 600; }
+  .navbtn.active { background: var(--gold); color: #22160a; }
+  #portfolioView { padding: 16px 20px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .kpi .n { font-size: 26px; font-weight: 700; color: var(--navy); line-height: 1.1; }
+  .kpi .l { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .kpi .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .prow { display: grid; grid-template-columns: 150px 1fr 40px; gap: 10px; align-items: center; padding: 5px 0; font-size: 12.5px; }
+  .bar { height: 8px; background: #eef1f5; border-radius: 5px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--gold); border-radius: 5px; }
+  .ptable { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ptable th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .ptable td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .ptable tr.crow { cursor: pointer; }
+  .ptable tr.crow:hover { background: #f7f9fb; }
+  .stagechip { font-size: 11px; padding: 2px 9px; border-radius: 20px; background: #eef4fb; color: var(--navy); white-space: nowrap; }
+  .stub { color: var(--muted); font-size: 12px; }
+  @media (max-width: 900px) { .pgrid { grid-template-columns: 1fr; } }
+  /* performance surface */
+  #performanceView { padding: 16px 20px; }
+  .spark { display: flex; align-items: flex-end; gap: 3px; height: 42px; }
+  .spark i { display: block; width: 10px; background: var(--gold); border-radius: 2px 2px 0 0; min-height: 2px; }
+  .spark i.warn { background: var(--red); }
+  .trow { display: grid; grid-template-columns: 120px 1fr 130px; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .trow:first-child { border-top: 0; }
+  .movebadge { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+  .movebadge.auto { background: #e7f7ee; color: var(--green); }
+  .movebadge.waiting { background: #fdf3e0; color: var(--amber); }
+  /* localisation workbench */
+  #localisationView { padding: 16px 20px; }
+  .locpair { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 12px; }
+  .loccols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
+  .loccol h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .marketchip { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 20px; background: #eef4fb; color: var(--navy); }
+  @media (max-width: 900px) { .loccols { grid-template-columns: 1fr; } }
+  /* admin sections */
+  .asection { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .asection:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .ahdr { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .arow { display: grid; grid-template-columns: 1fr 150px; gap: 10px; align-items: center; padding: 4px 0; font-size: 12.5px; }
+  .arow select { padding: 6px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+  /* intake wizard modal */
+  .modal { position: fixed; inset: 0; background: rgba(10,22,40,.5); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 20px; }
+  .modalcard { background: #fff; border-radius: 12px; width: 480px; max-width: 100%; max-height: 90vh; overflow: auto; padding: 18px 20px; }
+  .modalcard h2 { margin: 0 0 4px; font-size: 15px; }
+  .modalcard .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .wform { display: flex; flex-direction: column; gap: 4px; }
+  .wform label { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .wform input, .wform textarea { border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 13px; font-family: inherit; }
+  .wform textarea { resize: vertical; min-height: 44px; }
+  .wrow2 { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+  .modalactions { display: flex; gap: 8px; margin-top: 16px; }
+  .wtabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; width: max-content; }
+  .wtabs button { border: 0; background: #f4f6f9; color: var(--muted); padding: 7px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .wtabs button.active { background: var(--navy); color: #fff; }
+  #wChatLog { max-height: 300px; overflow-y: auto; font-size: 13px; margin-bottom: 10px; }
+  #wChatLog .msg { padding: 7px 10px; border-radius: 9px; margin: 6px 0; max-width: 92%; }
+  #wChatLog .msg.astra { background: #fffaf0; border: 1px solid #f0e2c2; }
+  #wChatLog .msg.me { background: #eef2f7; margin-left: auto; }
+  #wChatForm { display: flex; gap: 6px; }
+  #wChatInput { flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 9px; font-size: 13px; }
+  /* command palette (§8.4) */
+  #palette { display: none; position: fixed; inset: 0; background: rgba(10,22,40,.45); z-index: 40; }
+  #palette .pbox { width: 480px; max-width: 92vw; margin: 12vh auto 0; background: #fff; border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.3); overflow: hidden; }
+  #paletteInput { width: 100%; border: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; font-size: 15px; outline: none; }
+  #paletteList { max-height: 46vh; overflow-y: auto; }
+  #paletteList .pitem { padding: 10px 16px; font-size: 13.5px; cursor: pointer; display: flex; justify-content: space-between; }
+  #paletteList .pitem .hint { color: var(--muted); font-size: 11.5px; }
+  #paletteList .pitem.sel { background: #fffaf0; box-shadow: inset 3px 0 0 var(--gold); }
+  #paletteFooter { padding: 7px 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+  #toast { display:none; position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: #2a0d10; color: #ffd9dd; border: 1px solid var(--red); padding: 10px 16px;
+    border-radius: 10px; font-size: 13px; font-weight: 600; z-index: 20; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">ASTRA CAMPAIGN STUDIO<small>ARTIZENT</small></div>
+  <nav class="viewnav">
+    <button id="navPortfolio" class="navbtn">Portfolio</button>
+    <button id="navCampaign" class="navbtn active">Campaign</button>
+    <button id="navPerformance" class="navbtn">Performance</button>
+    <button id="navLocalisation" class="navbtn">Localisation</button>
+  </nav>
+  <div class="pills" id="telemetry"></div>
+  <span class="rolelabel">Signed in as</span>
+  <select id="roleSel" title="Switch role" aria-label="Switch role"></select>
+  <select id="picker" title="Select campaign" aria-label="Select campaign"></select>
+  <button class="new" id="newBtn" title="Create a new campaign">New campaign</button>
+</header>
+
+<main>
+  <div class="col">
+    <div class="card"><h2>Campaign Canvas</h2><div class="rail" id="rail"></div></div>
+    <div class="card"><h2>Campaign</h2><div class="pad meta" id="meta"></div></div>
+    <div class="card" id="figmaCard" style="display:none"><h2>Figma board</h2><div class="pad" id="figma"></div></div>
+    <div class="card"><h2>Artifacts &amp; approvals</h2><div class="pad" id="artifacts"></div></div>
+  </div>
+
+  <div class="col">
+    <div class="card"><h2>Actions</h2><div class="pad" id="actions"></div></div>
+    <div class="card" id="settingsCard" style="display:none"><h2>Model gateway · admin</h2><div class="pad" id="settings"></div></div>
+    <div class="card chat"><h2>Command rail</h2><div class="pad">
+      <div class="log" id="chatlog"></div>
+      <form id="chatform"><input id="chatinput" placeholder="e.g. run stage · approve all · advance" autocomplete="off"/><button class="ghost">Send</button></form>
+    </div></div>
+    <div class="card" id="handoffsCard" style="display:none"><h2>Your hand-offs</h2><div class="pad" id="handoffs"></div></div>
+    <div class="card"><h2>Notifications</h2><div class="pad" id="notifs"></div></div>
+    <div class="card"><h2>Live activity</h2><div class="pad activity" id="activity"></div></div>
+  </div>
+</main>
+
+<section id="portfolioView" style="display:none">
+  <div class="kpis" id="pKpis"></div>
+  <div class="pgrid">
+    <div class="card"><h2>Pipeline by stage</h2><div class="pad" id="pPipeline"></div></div>
+    <div class="card"><h2>Cycle time by stage</h2><div class="pad" id="pCycle"></div></div>
+  </div>
+  <div class="card"><h2>Campaigns</h2><div class="pad" id="pCampaigns"></div></div>
+</section>
+
+<section id="performanceView" style="display:none">
+  <div class="kpis" id="perfKpis"></div>
+  <div class="pgrid">
+    <div class="card"><h2>Channel trend (per snapshot)</h2><div class="pad" id="perfTrend"></div></div>
+    <div class="card"><h2>Budget moves</h2><div class="pad" id="perfMoves"></div></div>
+  </div>
+  <div class="pgrid">
+    <div class="card"><h2>Experiments</h2><div class="pad" id="perfExperiments"></div></div>
+    <div class="card"><h2>Anomalies &amp; actions</h2><div class="pad" id="perfAnomalies"></div></div>
+  </div>
+</section>
+
+<section id="localisationView" style="display:none">
+  <div class="card"><h2>Localisation Workbench — source vs. market adaptation</h2><div class="pad" id="locPairs"></div></div>
+</section>
+
+<div id="wizard" class="modal" style="display:none">
+  <div class="modalcard">
+    <h2>New campaign — brief intake</h2>
+    <div class="sub">The Intake Agent interviews you and asks only what's missing — or use the form.</div>
+    <div class="wtabs">
+      <button id="wTabChat" class="active" onclick="setWizardMode('chat')">Interview</button>
+      <button id="wTabForm" onclick="setWizardMode('form')">Form</button>
+    </div>
+
+    <div id="wChat">
+      <div id="wChatLog"></div>
+      <form id="wChatForm"><input id="wChatInput" placeholder="Type your answer…" autocomplete="off"/><button class="approve">Send</button></form>
+      <div class="modalactions"><button class="ghost" onclick="closeWizard()">Cancel</button></div>
+    </div>
+
+    <div id="wFormPane" style="display:none">
+    <div class="wform">
+      <label for="wObjective">Objective</label>
+      <textarea id="wObjective" placeholder="What is this campaign trying to achieve?"></textarea>
+      <label for="wMarkets">Target markets (comma-separated)</label>
+      <input id="wMarkets" placeholder="DE, AT, CH, US"/>
+      <div class="wrow2">
+        <div style="display:flex;flex-direction:column"><label for="wBudget">Budget</label><input id="wBudget" type="number" placeholder="250000"/></div>
+        <div style="display:flex;flex-direction:column"><label for="wCurrency">Currency</label><input id="wCurrency" value="EUR"/></div>
+      </div>
+      <label for="wMetric">Primary success metric</label>
+      <input id="wMetric" placeholder="Qualified leads"/>
+      <label for="wClaims">Mandatory claims / constraints</label>
+      <textarea id="wClaims" placeholder="e.g. cordless performance claims require a test-condition footnote"></textarea>
+    </div>
+    <div class="modalactions">
+      <button class="approve" onclick="submitWizard()">Create campaign</button>
+      <button class="ghost" onclick="closeWizard()">Cancel</button>
+    </div>
+    </div>
+  </div>
+</div>
+
+<div id="palette" role="dialog" aria-label="Command palette">
+  <div class="pbox">
+    <input id="paletteInput" placeholder="Type a command… (navigate, run, approve, switch role, open campaign)" autocomplete="off"/>
+    <div id="paletteList"></div>
+    <div id="paletteFooter">↑↓ navigate · Enter run · Esc close · Ctrl+K anywhere</div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STAGE_LABEL = {
+  "intake":"Intake","campaign-planning":"Campaign planning","content-planning":"Content planning",
+  "content-creation":"Content creation","rollout":"Roll-out","campaign-optimisation":"Campaign optimisation",
+  "content-optimisation":"Content optimisation"
+};
+// Short labels for the compact horizontal stage rail.
+const STAGE_SHORT = {
+  "intake":"Intake","campaign-planning":"Planning","content-planning":"Content plan",
+  "content-creation":"Creation","rollout":"Roll-out","campaign-optimisation":"Optimisation",
+  "content-optimisation":"Content opt."
+};
+const KIND_LABEL = {
+  "brief":"Brief","strategy":"Strategy","audience":"Audience","value-prop":"Value proposition",
+  "messaging":"Messaging","media-plan":"Media plan","budget":"Budget","competitive-insight":"Competitive insight",
+  "kpi":"KPIs","concept":"Concept","storyboard":"Storyboard","content-calendar":"Content calendar",
+  "creative-brief":"Creative brief","journey":"Journey","pdp-plan":"PDP plan","content-item":"Content",
+  "asset":"Asset","deployment":"Deployment","metric":"Metric","learning":"Learning","note":"Note"
+};
+const STATUS_LABEL = {
+  "proposed":"Draft","in-review":"Needs review","approved":"Approved","rejected":"Changes requested","superseded":"Superseded"
+};
+const EVAL_LABEL = {
+  "grounding":"Sourced","brand-tone":"On brand","compliance":"Compliant",
+  "accessibility":"Accessible","localisation-equivalence":"Localised"
+};
+const FRAME_LABEL = {
+  "paid-headline":"Paid headline","paid-body":"Paid body","hero-image":"Hero image",
+  "email-subject":"Email subject","email-hero":"Email hero","landing-hero":"Landing hero"
+};
+const label = (map, k) => map[k] || k;
+let current = null;                    // campaign id
+let currentRole = 'campaign-manager';  // persona selected in the role switcher
+let lastView = null;                   // last rendered canvas (for local re-renders)
+const bodyOpen = {};                   // artifact id -> explicit expand/collapse choice
+let editing = null;                    // artifact id currently being edited inline
+let viewerCanEdit = false;             // whether the current role may edit content
+let appView = 'campaign';              // 'campaign' (canvas) or 'portfolio' (Mission Control)
+
+// Turn an artifact body object into a readable key/value view.
+function humanKey(k) {
+  return k.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ')
+    .replace(/^\w/, c => c.toUpperCase());
+}
+// Image-valued fields (generated hero art, Claude Design outputs) render as previews.
+function isImageUrl(v) {
+  return typeof v === 'string' && /^\/assets\/[a-z0-9@._-]+\.(svg|png|jpe?g|webp)$/i.test(v);
+}
+function imagePreview(v, big) {
+  return `<a href="${esc(v)}" target="_blank" rel="noopener"><img class="assetpreview${big ? ' big' : ''}" src="${esc(v)}" alt="Generated campaign artwork" loading="lazy"></a>`;
+}
+function renderVal(v) {
+  if (v === null || v === undefined || v === '') return '<span class="bmuted">—</span>';
+  if (isImageUrl(v)) return imagePreview(v, false);
+  if (Array.isArray(v)) {
+    if (!v.length) return '<span class="bmuted">none</span>';
+    if (v.every(x => typeof x !== 'object')) return esc(v.join(', '));
+    return '<ul class="blist">' + v.map(x => '<li>' + renderVal(x) + '</li>').join('') + '</ul>';
+  }
+  if (typeof v === 'object') {
+    return Object.entries(v).map(([k, val]) => `<b>${esc(humanKey(k))}:</b> ${renderVal(val)}`).join(' · ');
+  }
+  return esc(String(v));
+}
+function renderBody(body) {
+  const entries = Object.entries(body || {});
+  if (!entries.length) return '';
+  return '<div class="bodyview">' + entries.map(([k, v]) =>
+    `<div class="brow"><div class="bk">${esc(humanKey(k))}</div><div class="bv">${renderVal(v)}</div></div>`).join('') + '</div>';
+}
+// ── Diff-first editing (§8.4): word-level diffs between artifact versions ─────
+const diffOpen = {};
+function diffWords(oldText, newText) {
+  const a = String(oldText).split(/\s+/).filter(Boolean);
+  const b = String(newText).split(/\s+/).filter(Boolean);
+  // LCS table (fields are short — quadratic is fine).
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { out.push(esc(a[i])); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(`<del>${esc(a[i])}</del>`); i++; }
+    else { out.push(`<ins>${esc(b[j])}</ins>`); j++; }
+  }
+  while (i < a.length) out.push(`<del>${esc(a[i++])}</del>`);
+  while (j < b.length) out.push(`<ins>${esc(b[j++])}</ins>`);
+  return out.join(' ');
+}
+function predecessorOf(a) {
+  return (lastView?.artifacts || []).find(p =>
+    p.id !== a.id && p.kind === a.kind && p.title === a.title && p.version === a.version - 1);
+}
+function renderDiff(a, prev) {
+  const keys = [...new Set([...Object.keys(prev.body), ...Object.keys(a.body)])]
+    .filter(k => typeof (a.body[k] ?? prev.body[k]) === 'string');
+  const rows = keys
+    .filter(k => String(prev.body[k] ?? '') !== String(a.body[k] ?? ''))
+    .map(k => `<div class="brow"><div class="bk">${esc(humanKey(k))}</div>
+      <div class="bv">${diffWords(prev.body[k] ?? '', a.body[k] ?? '')}</div></div>`);
+  return rows.length
+    ? `<div class="diffview">${rows.join('')}<div class="cite" style="margin-top:4px">vs. v${prev.version} — <del>removed</del> · <ins>added</ins></div></div>`
+    : `<div class="diffview"><div class="cite">No text changes vs. v${prev.version}.</div></div>`;
+}
+function toggleDiff(id) { diffOpen[id] = !diffOpen[id]; if (lastView) render(lastView); }
+
+function toggleBody(id) {
+  const a = (lastView?.artifacts || []).find(x => x.id === id);
+  const openNow = (id in bodyOpen) ? bodyOpen[id] : (a && a.status === 'in-review');
+  bodyOpen[id] = !openNow;
+  if (lastView) render(lastView);
+}
+// ── @mentions / hand-offs (§8.4) ──────────────────────────────────────────────
+const mentionOpen = {};
+function roleOptionsHtml() {
+  return [...document.querySelectorAll('#roleSel option')]
+    .filter(o => o.value !== currentRole)
+    .map(o => `<option value="${o.value}">${esc(o.textContent)}</option>`).join('');
+}
+function toggleMention(id) { mentionOpen[id] = !mentionOpen[id]; if (lastView) render(lastView); }
+async function sendMention(id) {
+  const toRole = document.getElementById(`menRole-${id}`).value;
+  const message = document.getElementById(`menMsg-${id}`).value.trim();
+  if (!message) { toast('Say what you need from them.'); return; }
+  mentionOpen[id] = false;
+  const r = await api('POST', `/api/campaigns/${current}/mention`, { artifactId: id, toRole, message });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  render(r);
+  await renderNotifications(); // the hand-off notification shows immediately
+  toast('Hand-off sent — they\'ll see it in their queue.', true);
+}
+async function resolveMention(mid) {
+  const r = await api('POST', `/api/campaigns/${current}/mention/${mid}/resolve`);
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  render(r);
+  toast('Hand-off closed.', true);
+}
+
+function enterEdit(id) { editing = id; if (lastView) render(lastView); }
+function cancelEdit() { editing = null; if (lastView) render(lastView); }
+async function saveEdit(id) {
+  const card = document.querySelector(`[data-edit="${id}"]`);
+  const fields = {};
+  card?.querySelectorAll('textarea[data-field]').forEach(t => { fields[t.getAttribute('data-field')] = t.value; });
+  editing = null;
+  const r = await api('POST', `/api/campaigns/${current}/edit`, { artifactId: id, fields });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); if (lastView) render(lastView); return; }
+  render(r.view);
+  toast(r.blocked ? 'Saved, but a quality check failed — see the flagged draft.' : 'Saved as a new version — awaiting approval.', !r.blocked);
+  await loadPortfolio();
+}
+// The inline edit form: one field per free-text body value.
+function editCard(a) {
+  const fields = Object.entries(a.body).filter(([, v]) => typeof v === 'string');
+  const inputs = fields.map(([k, v]) =>
+    `<label class="elabel">${esc(humanKey(k))}</label><textarea class="etext" data-field="${esc(k)}">${esc(v)}</textarea>`).join('');
+  return `<div class="art editing" data-edit="${a.id}">
+    <div class="top"><span class="title">${esc(a.title)}</span><span class="kind">${esc(label(KIND_LABEL, a.kind))}</span><span class="status in-review">Editing</span></div>
+    <div class="editform">${inputs || '<div class="cite">This item has no free-text fields to edit.</div>'}</div>
+    <div class="actions"><button class="approve" onclick="saveEdit('${a.id}')">Save changes</button><button class="ghost" onclick="cancelEdit()">Cancel</button></div>
+    <div class="cite" style="margin-top:6px">Saving creates a new version and re-runs the quality checks; sign-off is required again.</div>
+  </div>`;
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'content-type': 'application/json', 'x-astra-role': currentRole },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return res.json();
+}
+
+async function loadRoles() {
+  const roles = await api('GET', '/api/roles');
+  $('roleSel').innerHTML = roles.map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('');
+  $('roleSel').value = currentRole;
+}
+
+// ── Mission Control (portfolio) ───────────────────────────────────────────────
+const fmtMoney = (n, cur) => `${cur || 'EUR'} ${Number(n || 0).toLocaleString()}`;
+function fmtDur(ms) {
+  if (ms == null) return '—';
+  if (ms < 1000) return '<1s';
+  const s = Math.round(ms / 1000); if (s < 60) return s + 's';
+  const m = Math.round(s / 60); if (m < 60) return m + 'm';
+  return Math.round(m / 60) + 'h';
+}
+const kpi = (n, l, sub) => `<div class="kpi"><div class="n">${esc(String(n))}</div><div class="l">${esc(l)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
+
+function setView(v) {
+  appView = v;
+  $('navPortfolio').classList.toggle('active', v === 'portfolio');
+  $('navCampaign').classList.toggle('active', v === 'campaign');
+  $('navPerformance').classList.toggle('active', v === 'performance');
+  $('navLocalisation').classList.toggle('active', v === 'localisation');
+  document.querySelector('main').style.display = v === 'campaign' ? '' : 'none';
+  $('portfolioView').style.display = v === 'portfolio' ? '' : 'none';
+  $('performanceView').style.display = v === 'performance' ? '' : 'none';
+  $('localisationView').style.display = v === 'localisation' ? '' : 'none';
+  $('telemetry').style.display = v === 'campaign' ? '' : 'none';
+  $('picker').style.display = v === 'portfolio' ? 'none' : ''; // per-campaign views need the picker
+  if (v === 'portfolio') renderPortfolio();
+  else if (v === 'performance') renderPerformance();
+  else if (v === 'localisation') renderLocalisation();
+  else refresh();
+}
+
+// ── Localisation Workbench (§8.2 — side-by-side source/target) ────────────────
+async function renderLocalisation() {
+  if (!current) return;
+  const v = await api('GET', `/api/campaigns/${current}/localisation`);
+  if (!v || v.error) { $('locPairs').innerHTML = `<div class="stub">${esc((v && v.error) || 'Not available.')}</div>`; return; }
+  if (!v.pairs.length) {
+    $('locPairs').innerHTML = '<div class="stub">Market adaptations appear here once the Localisation / Transcreation agents run (content creation onwards).</div>';
+    return;
+  }
+  const fields = (body) => Object.entries(body)
+    .filter(([k, val]) => typeof val === 'string' && k !== 'market' && k !== 'channel')
+    .map(([k, val]) => `<div class="brow"><div class="bk">${esc(humanKey(k))}</div><div class="bv">${esc(val)}</div></div>`)
+    .join('');
+  $('locPairs').innerHTML = v.pairs.map(p => {
+    const eq = p.equivalence
+      ? `<span class="chip ${p.equivalence.passed ? 'pass' : 'fail'}" title="${esc(p.equivalence.detail)}">Localised</span>`
+      : '';
+    const actions = p.target.canApprove
+      ? `<div class="actions" style="margin-top:8px">
+          <button class="approve" onclick="locApprove('${p.target.id}')">Approve</button>
+          <button class="reject" onclick="locRevise('${p.target.id}')">Request changes</button></div>`
+      : `<div class="cite" style="margin-top:8px">Status: ${esc(label(STATUS_LABEL, p.target.status))}</div>`;
+    return `<div class="locpair">
+      <div><span class="marketchip">${esc(p.market)}</span> <b style="margin-left:8px">${esc(p.target.title)}</b>
+        <span style="float:right">${eq}</span></div>
+      <div class="loccols">
+        <div class="loccol"><h4>Source</h4><div class="bodyview">${p.source ? fields(p.source.body) : '<div class="bmuted">No source linked.</div>'}</div></div>
+        <div class="loccol"><h4>Market adaptation — ${esc(p.market)}</h4><div class="bodyview">${fields(p.target.body)}</div></div>
+      </div>
+      ${actions}</div>`;
+  }).join('');
+}
+async function locApprove(id) {
+  const r = await api('POST', `/api/campaigns/${current}/approve`, { artifactId: id });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  toast('Market variant approved.', true);
+  renderLocalisation();
+}
+async function locRevise(id) {
+  const feedback = prompt('What should change in this market adaptation?', 'Tone reads too literal for this market.');
+  if (feedback === null) return;
+  const r = await api('POST', `/api/campaigns/${current}/revise`, { artifactId: id, feedback });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  toast('Sent back — the agent is re-adapting with your feedback.', true);
+  renderLocalisation();
+}
+
+// ── Performance & Optimisation surface (§8.2) ─────────────────────────────────
+async function renderPerformance() {
+  if (!current) return;
+  const [p, view] = await Promise.all([
+    api('GET', `/api/campaigns/${current}/performance`),
+    api('GET', `/api/campaigns/${current}`),
+  ]);
+  if (!p || p.error) return;
+  const canRefresh = view && view.viewer && view.viewer.canRunAgents &&
+    ['campaign-optimisation', 'content-optimisation'].includes(view.campaign.currentStage);
+  const refreshBtn = canRefresh
+    ? `<div class="kpi" style="display:flex;align-items:center;justify-content:center">
+         <button class="bigbtn gold" style="width:auto;padding:10px 16px" onclick="refreshMetrics()">Pull fresh metrics</button>
+       </div>` : '';
+
+  if (!p.available) {
+    $('perfKpis').innerHTML = kpi('—', 'No performance data yet', 'metrics start at Campaign optimisation') + refreshBtn;
+    $('perfTrend').innerHTML = '<div class="stub">Snapshots appear here once the Performance Management Agent runs.</div>';
+    $('perfMoves').innerHTML = '<div class="stub">No budget moves yet.</div>';
+    $('perfExperiments').innerHTML = '<div class="stub">No experiments yet.</div>';
+    $('perfAnomalies').innerHTML = '<div class="stub">No anomalies flagged.</div>';
+    return;
+  }
+
+  const leadPct = p.kpi.leadTarget ? Math.min(100, Math.round(p.totals.leads / p.kpi.leadTarget * 100)) : null;
+  const cplOk = p.kpi.maxCpl == null || p.totals.blendedCpl == null || p.totals.blendedCpl <= p.kpi.maxCpl;
+  $('perfKpis').innerHTML = [
+    kpi(p.totals.leads.toLocaleString('en-US'), `Leads${p.kpi.leadTarget ? ` · ${leadPct}% of target` : ''}`,
+        p.kpi.leadTarget ? `target ${p.kpi.leadTarget.toLocaleString('en-US')} (${esc(p.kpi.primary || '')})` : ''),
+    kpi(p.totals.blendedCpl != null ? 'EUR ' + p.totals.blendedCpl : '—', 'Blended CPL',
+        p.kpi.maxCpl != null ? `guardrail ≤ EUR ${p.kpi.maxCpl} — ${cplOk ? 'inside' : 'BREACHED'}` : ''),
+    kpi('EUR ' + p.totals.spend.toLocaleString('en-US'), 'Spend observed', `${p.totals.observations} snapshot${p.totals.observations === 1 ? '' : 's'}`),
+    kpi(p.latest.length, 'Live channels', p.latest.map(c => c.channel).join(' · ')),
+  ].join('') + refreshBtn;
+
+  // Fatigue trend: CTR bars per snapshot, per channel (red when below the CTR target).
+  $('perfTrend').innerHTML = p.series.map(s => {
+    const max = Math.max(...s.points.map(pt => pt.ctr), 0.0001);
+    const bars = s.points.map(pt =>
+      `<i style="height:${Math.max(5, Math.round(pt.ctr / max * 100))}%" class="${p.kpi.ctrTarget && pt.ctr < p.kpi.ctrTarget ? 'warn' : ''}" title="obs ${pt.observation}: CTR ${(pt.ctr * 100).toFixed(2)}% · CPL EUR ${pt.cpl}"></i>`).join('');
+    const last = s.points[s.points.length - 1];
+    return `<div class="trow"><span>${esc(s.channel)}</span>
+      <div class="spark">${bars}</div>
+      <span class="cite">CTR ${(last.ctr * 100).toFixed(2)}% · CPL EUR ${last.cpl}</span></div>`;
+  }).join('') + `<div class="cite" style="margin-top:8px">Bars = CTR per snapshot${p.kpi.ctrTarget ? ` · red = below the locked ${(p.kpi.ctrTarget * 100).toFixed(1)}% target` : ''}. Hover for detail.</div>`;
+
+  $('perfMoves').innerHTML = p.budgetMoves.length ? p.budgetMoves.map(m => {
+    const badge = m.isRollback
+      ? '<span class="movebadge waiting">rollback applied</span>'
+      : m.rolledBack
+        ? '<span class="movebadge waiting">rolled back</span>'
+        : `<span class="movebadge ${m.applied ? 'auto' : 'waiting'}">${m.applied ? 'applied automatically' : 'awaiting approval'}</span>`;
+    const rollbackBtn = m.canRollback
+      ? ` <button class="linkbtn" onclick="rollbackMove('${m.id}')">Roll back</button>` : '';
+    return `<div class="act"><span class="who">${m.isRollback ? 'Rollback: ' : ''}${Math.round(m.share * 100)}% ${esc(m.from)} → ${esc(m.to)}</span>
+      <span style="float:right">${badge}</span>
+      <div class="why">${esc(m.reason)}${rollbackBtn}</div></div>`;
+  }).join('') + '<div class="cite" style="margin-top:6px">Every applied move is reversible — rollbacks are recorded, audited actions (§6.5).</div>'
+    : '<div class="stub">No budget moves yet.</div>';
+
+  const readoutRows = (p.readouts || []).map(r =>
+    `<div class="act"><span class="who">${esc(r.title)}</span>
+      <span class="movebadge auto" style="float:right">winner: ${esc(r.winner)}</span>
+      <div class="why">${esc(r.lift)} at ${esc(r.confidence)} confidence — ${esc(r.decision)}</div></div>`).join('');
+  $('perfExperiments').innerHTML = (p.experiments.length || readoutRows)
+    ? p.experiments.map(e =>
+        `<div class="act"><span class="who">${esc(e.title)}</span><div class="why">${esc(e.hypothesis)} · ${esc(e.split)} · readout: ${esc(e.readout)}</div></div>`).join('') + readoutRows
+    : '<div class="stub">No experiments yet.</div>';
+
+  $('perfAnomalies').innerHTML = p.anomalies.length ? p.anomalies.map(a =>
+    `<div class="act"><span class="who">${esc(a.signal)}</span><div class="why">${esc(a.pattern)} · severity ${esc(a.severity)}</div></div>`).join('')
+    : '<div class="stub">No anomalies flagged.</div>';
+}
+async function refreshMetrics() {
+  const r = await api('POST', `/api/campaigns/${current}/refresh-metrics`);
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  toast('Fresh snapshot pulled — within-guardrail actions applied automatically.', true);
+  renderPerformance();
+}
+async function rollbackMove(id) {
+  const reason = prompt('Why roll this move back?', 'CPL worsened after the shift — reverting.');
+  if (reason === null) return;
+  const r = await api('POST', `/api/campaigns/${current}/rollback`, { artifactId: id, reason });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  toast('Rolled back — the reversal is recorded in the audit trail.', true);
+  renderPerformance();
+}
+
+function openCampaign(id) { current = id; $('picker').value = id; setView('campaign'); }
+
+async function renderPortfolio() {
+  const p = await api('GET', '/api/portfolio');
+  if (!p || p.error) return;
+  const t = p.totals;
+  $('pKpis').innerHTML = [
+    kpi(t.activeCampaigns, 'Active campaigns', `${t.campaigns} total`),
+    kpi(t.pendingApprovals, 'Pending approvals', 'across the portfolio'),
+    kpi(`${t.approvedItems} / ${t.itemsProduced}`, 'Items approved', 'of items produced'),
+    kpi(`${Math.round(t.avgQualityPass * 100)}%`, 'Quality-check pass', 'avg across campaigns'),
+    kpi(fmtMoney(t.totalBudget, t.currency), 'Planned budget', 'spend & ROI: MVP-2'),
+    kpi(t.openRisks, 'Open risks', 'changes requested / blocked'),
+  ].join('');
+
+  const maxPipe = Math.max(1, ...p.pipeline.map(x => x.count));
+  $('pPipeline').innerHTML = p.pipeline.map(s =>
+    `<div class="prow"><span>${esc(label(STAGE_LABEL, s.stage))}</span><div class="bar"><i style="width:${Math.round(s.count / maxPipe * 100)}%"></i></div><b>${s.count}</b></div>`).join('');
+
+  if (p.cycleTime.length) {
+    const maxCyc = Math.max(1, ...p.cycleTime.map(x => x.avgMs));
+    $('pCycle').innerHTML = p.cycleTime.map(c =>
+      `<div class="prow"><span>${esc(label(STAGE_LABEL, c.stage))}</span><div class="bar"><i style="width:${Math.round(c.avgMs / maxCyc * 100)}%"></i></div><b>${fmtDur(c.avgMs)}</b></div>`).join('');
+  } else {
+    $('pCycle').innerHTML = '<div class="stub">No stage has completed yet.</div>';
+  }
+
+  $('pCampaigns').innerHTML = `<table class="ptable"><thead><tr>
+      <th>Campaign</th><th>Stage</th><th>Progress</th><th>To review</th><th>Quality</th><th>Budget</th></tr></thead><tbody>` +
+    (p.campaigns.length ? p.campaigns.map(c => `<tr class="crow" onclick="openCampaign('${c.id}')">
+        <td>${esc(c.objective)}</td>
+        <td><span class="stagechip">${esc(label(STAGE_SHORT, c.currentStage))}</span></td>
+        <td><div class="bar" style="width:90px"><i style="width:${Math.round(c.progress * 100)}%"></i></div></td>
+        <td>${c.pendingApprovals}</td>
+        <td>${Math.round(c.evalPassRate * 100)}%</td>
+        <td>${fmtMoney(c.budget, c.currency)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="stub">No campaigns yet.</td></tr>') +
+    `</tbody></table>
+     <div class="stub" style="margin-top:8px">Live spend, media efficiency and ROI connect in MVP-2 (finance &amp; analytics integrations).</div>`;
+}
+
+async function loadPortfolio() {
+  const rows = await api('GET', '/api/mission-control');
+  const picker = $('picker');
+  picker.innerHTML = rows.map(r => {
+    const short = r.objective.length > 44 ? r.objective.slice(0,44) + '…' : r.objective;
+    return `<option value="${r.id}">${esc(short)} · ${esc(label(STAGE_SHORT, r.currentStage))}</option>`;
+  }).join('');
+  if (!current && rows.length) current = rows[0].id;
+  if (current) picker.value = current;
+}
+
+function stageRail(view) {
+  return view.stageRail.map(s => {
+    let state = '';
+    if (s.state === 'done') state = 'Complete';
+    else if (s.state === 'active') state = s.gate.satisfied
+      ? '<span class="gate-ok">Ready to advance</span>'
+      : `<span class="gate-miss">Needs: ${s.gate.missing.map(k => esc(label(KIND_LABEL, k))).join(', ') || '—'}</span>`;
+    else state = 'Not started';
+    return `<div class="stage ${s.state}"><div class="s-name">${esc(label(STAGE_SHORT, s.stage))}</div><div class="s-state">${state}</div></div>`;
+  }).join('');
+}
+
+function artifactCard(a) {
+  if (editing === a.id) return editCard(a);
+  const evals = a.evals.map(e => `<span class="chip ${e.passed?'pass':'fail'}" title="${esc(e.detail)}">${esc(label(EVAL_LABEL, e.name))}</span>`).join('');
+  const sources = a.citations.length
+    ? `<div class="cite">Sources: ${a.citations.map(c=>esc(c.title)).join(', ')}</div>` : '';
+  const bodyHtml = renderBody(a.body);
+  const isOpen = (a.id in bodyOpen) ? bodyOpen[a.id] : (a.status === 'in-review');
+  const toggle = bodyHtml ? `<button class="linkbtn" onclick="toggleBody('${a.id}')">${isOpen ? 'Hide content' : 'View content'}</button>` : '';
+  const editable = viewerCanEdit && a.status !== 'superseded' && a.status !== 'rejected';
+  const editLink = editable ? `<button class="linkbtn" onclick="enterEdit('${a.id}')">Edit</button>` : '';
+  // @mentions (§8.4): thread + hand-off form.
+  const mentionThread = (a.mentions || []).map(m =>
+    `<div class="mention ${m.resolved ? 'resolved' : ''}">
+      <b>@${esc(m.toRoleLabel)}</b> — “${esc(m.message)}” <span class="cite">· ${esc(m.from)}</span>
+      ${m.resolved ? '<span class="cite" style="float:right">done</span>'
+        : m.canResolve ? `<button class="linkbtn" style="float:right" onclick="resolveMention('${m.id}')">Mark done</button>` : ''}
+    </div>`).join('');
+  const mentionLink = a.status !== 'superseded'
+    ? `<button class="linkbtn" onclick="toggleMention('${a.id}')">Mention</button>` : '';
+  const mentionForm = mentionOpen[a.id]
+    ? `<div class="mentionform">
+        <select id="menRole-${a.id}" aria-label="Hand off to">${roleOptionsHtml()}</select>
+        <input id="menMsg-${a.id}" placeholder="What do you need from them?"/>
+        <button class="ghost" onclick="sendMention('${a.id}')">Send</button>
+      </div>` : '';
+  const ver = a.version > 1 ? `<span class="ver">v${a.version}</span>` : '';
+  // Diff-first (§8.4): new versions arrive as reviewable diffs against the prior one.
+  const prev = a.version > 1 ? predecessorOf(a) : null;
+  const diffLink = prev ? `<button class="linkbtn" onclick="toggleDiff('${a.id}')">${diffOpen[a.id] ? 'Hide changes' : 'View changes'}</button>` : '';
+  const diffHtml = prev && diffOpen[a.id] ? renderDiff(a, prev) : '';
+  let actions = '';
+  if (a.status === 'in-review') {
+    actions = a.canApprove
+      ? `<div class="actions">
+          <button class="approve" onclick="approve('${a.id}')">Approve</button>
+          <button class="reject" onclick="revise('${a.id}')">Request changes</button></div>`
+      : `<div class="await">Awaiting review by the role that owns this sign-off.</div>`;
+  }
+  return `<div class="art">
+    <div class="top"><span class="title">${esc(a.title)}</span><span class="kind">${esc(label(KIND_LABEL, a.kind))}</span>${ver}
+      <span class="status ${a.status}">${esc(label(STATUS_LABEL, a.status))}</span></div>
+    <div class="rationale">${esc(a.rationale)}</div>
+    <div class="cardlinks">${toggle}${diffLink}${editLink}${mentionLink}</div>
+    ${diffHtml}
+    ${isOpen ? bodyHtml : ''}
+    ${evals ? `<div class="chips">${evals}</div>` : ''}
+    ${sources}${mentionThread}${mentionForm}${actions}</div>`;
+}
+
+function renderFigma(view) {
+  const board = view.artifacts.filter(a => a.title === 'Figma board (populated)').pop();
+  const card = $('figmaCard');
+  if (!board) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const frames = board.body.frames || {};
+  const rows = Object.entries(frames).map(([f,v]) =>
+    `<div class="frame"><div class="fname">${esc(label(FRAME_LABEL, f))}</div><div class="fval ${v?'':'empty'}">${v ? (isImageUrl(v) ? imagePreview(v, true) : esc(v)) : 'Empty placeholder'}</div></div>`).join('');
+  const opts = Object.keys(frames).map(f => `<option value="${f}">${esc(label(FRAME_LABEL, f))}</option>`).join('');
+  $('figma').innerHTML = `${rows}
+    <div class="cite" style="margin:10px 0 6px">Simulate a designer editing a frame, then sync it back:</div>
+    <div style="display:flex;gap:6px">
+      <select id="frameSel" class="ghost" style="padding:6px" aria-label="Frame to edit">${opts}</select>
+      <input id="frameVal" placeholder="New content for the frame" aria-label="New frame content" style="flex:1;border:1px solid var(--line);border-radius:7px;padding:6px"/>
+      <button class="ghost" onclick="figmaEdit()">Sync</button>
+    </div>`;
+}
+
+function render(view) {
+  if (!view || view.error) { $('artifacts').innerHTML = '<div class="empty">Select a campaign to begin.</div>'; return; }
+  lastView = view;
+  viewerCanEdit = view.viewer.canEdit;
+  $('rail').innerHTML = stageRail(view);
+  const t = view.telemetry;
+  $('telemetry').innerHTML =
+    `<span class="pill">Stage <b>${esc(label(STAGE_SHORT, view.campaign.currentStage))}</b></span>
+     <span class="pill">To review <b>${view.reviewQueue.length}</b></span>
+     <span class="pill">Items <b>${t.artifacts}</b></span>
+     <span class="pill">Quality checks <b>${Math.round(t.evalPassRate*100)}%</b></span>
+     <span class="pill" title="Share of items a human sent back at least once (§14.1)">Rework <b>${Math.round(t.reworkRate*100)}%</b></span>` +
+    (t.humanEditDistance != null ? `<span class="pill" title="Avg word-level change humans make to AI drafts (§14.1)">Edit distance <b>${Math.round(t.humanEditDistance*100)}%</b></span>` : '') +
+    (t.costPerApprovedItem != null ? `<span class="pill" title="Model tokens per approved item (§14.1)">Tokens/item <b>${t.costPerApprovedItem.toLocaleString('en-US')}</b></span>` : '');
+  const c = view.campaign;
+  $('meta').innerHTML =
+    `<div><span>Objective:</span> ${esc(c.objective)}</div>
+     <div><span>Markets:</span> ${c.markets.map(esc).join(', ')}</div>
+     <div><span>Budget:</span> ${c.currency} ${c.budget.toLocaleString()}</div>
+     <div><span>KPIs:</span> ${c.kpis.map(esc).join(', ')}</div>`;
+
+  // group artifacts by stage
+  const groups = {};
+  for (const a of view.artifacts) (groups[a.stage] ??= []).push(a);
+  $('artifacts').innerHTML = Object.keys(groups).length
+    ? Object.entries(groups).map(([st, arts]) =>
+        `<div class="stagegroup"><h3>${esc(label(STAGE_LABEL, st))}</h3>${arts.map(artifactCard).join('')}</div>`).join('')
+    : '<div class="empty">No items yet — run the current stage to generate work.</div>';
+
+  const active = view.stageRail.find(s => s.state === 'active');
+  const gateReady = active && active.gate && active.gate.satisfied;
+  const v = view.viewer;
+  const runBtn = v.canRunAgents
+    ? `<button class="bigbtn gold" onclick="runStage()">Run current stage</button>`
+    : `<button class="bigbtn gold" disabled title="Not available to the ${esc(v.label)} role">Run current stage</button>`;
+  const advTitle = !v.canAdvance ? `Not available to the ${esc(v.label)} role`
+    : (!gateReady ? 'Complete this stage’s required items first' : 'Advance to the next stage');
+  const advBtn = `<button class="bigbtn" onclick="advance()" title="${advTitle}" ${v.canAdvance && gateReady ? '' : 'disabled'}>Advance to next stage</button>`;
+  // Go-live (§6.4): only at Roll-out, only for roles with go-live authority.
+  const showGoLive = view.campaign.currentStage === 'rollout' && v.canGoLive;
+  const goLiveBtn = showGoLive
+    ? `<div style="height:8px"></div><button class="bigbtn" style="background:var(--red)" onclick="goLive()" title="Executes the approved deployments — publish, send, launch">Go live</button>
+       <div class="cite" style="margin-top:6px">Irreversible: requires approved deployments and a passing consent check.</div>`
+    : '';
+  $('actions').innerHTML =
+    `<div class="cite" style="margin-bottom:10px">Signed in as <b>${esc(v.label)}</b>. Your review queue below shows only items you can sign off.</div>
+     ${runBtn}<div style="height:8px"></div>${advBtn}${goLiveBtn}`;
+
+  $('activity').innerHTML = view.activity.slice(0, 40).map(r =>
+    `<div class="act"><span class="who">${esc(r.who)}</span> — ${esc(r.what)}${r.why?`<div class="why">${esc(r.why)}</div>`:''}</div>`).join('');
+
+  // Your hand-offs (§8.4): open mentions targeting the current persona.
+  const hc = $('handoffsCard');
+  if (view.myMentions && view.myMentions.length) {
+    hc.style.display = '';
+    $('handoffs').innerHTML = view.myMentions.map(m =>
+      `<div class="mention"><b>${esc(m.from)}</b> on “${esc(m.artifactTitle)}”: “${esc(m.message)}”
+        <button class="linkbtn" style="float:right" onclick="resolveMention('${m.id}')">Mark done</button></div>`).join('');
+  } else {
+    hc.style.display = 'none';
+  }
+
+  renderFigma(view);
+  renderSettings(view.viewer.canAdmin);
+}
+
+function afterAction(r) {
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return false; }
+  render(r && r.view ? r.view : r);
+  return true;
+}
+function toast(msg, ok) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = ok ? '#0e2a16' : '#2a0d10';
+  el.style.borderColor = ok ? 'var(--green)' : 'var(--red)';
+  el.style.color = ok ? '#d6ffe4' : '#ffd9dd';
+  el.style.display = 'block';
+  clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = 'none'; }, 4500);
+}
+
+async function renderSettings(isAdmin) {
+  const card = document.getElementById('settingsCard');
+  if (!isAdmin) { card.style.display = 'none'; return; }
+  // Don't re-render while the admin is typing in the console (live refresh runs every 5s).
+  if (card.style.display !== 'none' && document.activeElement && card.contains(document.activeElement)) return;
+  card.style.display = '';
+  const [s, policy, agents, integ, knowledge, guests, golden] = await Promise.all([
+    api('GET', '/api/settings'), api('GET', '/api/admin/policy'),
+    api('GET', '/api/admin/agents'), api('GET', '/api/admin/integrations'),
+    api('GET', '/api/admin/knowledge'), api('GET', '/api/admin/guest-access'),
+    api('GET', '/api/admin/golden'),
+  ]);
+  if (!s || s.forbidden) { card.style.display = 'none'; return; }
+  const active = s.activeProvider === 'anthropic';
+
+  const gateway = `
+    <div class="cite" style="margin-bottom:8px">Reasoning provider:
+      <b style="color:${active ? 'var(--green)' : 'var(--amber)'}">${active ? 'Claude (' + esc(s.keyHint) + ')' : 'mock provider — no key'}</b>
+      · default model <code>${esc(s.defaultModel)}</code></div>
+    <input id="keyInput" type="password" placeholder="sk-ant-..." autocomplete="off"
+      style="width:100%;border:1px solid var(--line);border-radius:7px;padding:8px;font-size:13px"/>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="approve" onclick="saveKey()">Save key</button>
+      <button class="ghost" onclick="clearKey()">Use mock</button>
+    </div>
+    <div class="cite" style="margin-top:8px">Held in memory only — never written to disk or shown again.</div>
+    ${(() => {
+      const sf = s.safety || {};
+      const sum = (o) => Object.values(o || {}).reduce((a, b) => a + b, 0);
+      const prompts = sum(sf.modelPrompts), conn = sum(sf.connectorResults), know = sum(sf.knowledgeIngestion);
+      const detail = [
+        prompts ? `${prompts} redaction${prompts === 1 ? '' : 's'} in outbound prompts` : null,
+        conn ? `${conn} neutralised in connector results` : null,
+        know ? `${know} handled at knowledge ingestion` : null,
+      ].filter(Boolean).join(' · ');
+      return `<div class="cite" style="margin-top:6px"><b>Trust &amp; safety:</b> ${detail || 'no PII, secrets or injection attempts encountered yet'} — PII/secret redaction and injection defences run automatically at every seam.</div>`;
+    })()}`;
+
+  const levelOpts = (cur) => (policy?.levels || []).map(l =>
+    `<option value="${l.level}" ${l.level === cur ? 'selected' : ''}>${esc(l.name)}</option>`).join('');
+  const policyRows = (policy?.rules || []).map(r =>
+    `<div class="arow"><span>${esc(r.stageLabel)} · <span class="bmuted">${esc(r.role)}</span></span>
+      <select onchange="setAutonomy('${esc(r.role)}','${esc(r.stage)}',this.value)">${levelOpts(r.autonomy)}</select></div>`).join('');
+
+  const agentRows = (agents?.stages || []).map(st =>
+    `<div class="cite" style="margin:3px 0"><b>${esc(st.stageLabel)}</b> (${st.agents.length}) — ${st.agents.map(esc).join(', ')}</div>`).join('');
+
+  // Figma — token-optional: live REST API when configured, built-in mock otherwise.
+  const fig = integ?.figma || { mode: 'mock', fileKey: null, tokenHint: null };
+  const figmaPanel = `
+    <div class="cite" style="margin:2px 0"><b>Figma</b> ·
+      ${fig.mode === 'live'
+        ? `<b style="color:var(--green)">live</b> · file <code>${esc(fig.fileKey)}</code> · token ${esc(fig.tokenHint)}`
+        : `<b style="color:var(--amber)">mock board</b> — connect a token to read your real file`}</div>
+    <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap">
+      <input id="figToken" type="password" placeholder="Figma token (figd_…)" style="flex:1 1 130px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px" autocomplete="off"/>
+      <input id="figFile" placeholder="File key" style="flex:0 1 90px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px"/>
+      <button class="ghost" onclick="saveFigma()">Connect</button>
+      ${fig.mode === 'live' ? '<button class="ghost" onclick="clearFigma()">Use mock</button>' : ''}
+    </div>
+    <div class="cite">Live mode reads named frames from your file and posts mapped copy as comments (the Figma REST API is read-only for canvas content).</div>`;
+
+  // Claude Design (Anthropic Labs) via its MCP server.
+  const cd = integ?.claudeDesign || { configured: false, endpoint: '', tokenHint: null, tools: [] };
+  const cdPanel = `
+    <div class="cite" style="margin:10px 0 2px"><b>Claude Design</b> ·
+      ${cd.configured
+        ? `<b style="color:var(--green)">connected</b> · ${esc(cd.serverName || 'MCP server')} · ${cd.tools.length} tool${cd.tools.length === 1 ? '' : 's'}${cd.tools.length ? ` (${cd.tools.slice(0, 4).map(esc).join(', ')}${cd.tools.length > 4 ? '…' : ''})` : ''} · token ${esc(cd.tokenHint)}`
+        : `<b style="color:var(--amber)">not connected</b> — Anthropic Labs, via MCP`}</div>
+    <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap">
+      <input id="cdEndpoint" value="${esc(cd.endpoint)}" placeholder="MCP endpoint" style="flex:1 1 130px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px"/>
+      <input id="cdToken" type="password" placeholder="Bearer token" style="flex:0 1 110px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px" autocomplete="off"/>
+      <button class="ghost" onclick="connectClaudeDesign()">Connect</button>
+      ${cd.configured ? '<button class="ghost" onclick="disconnectClaudeDesign()">Disconnect</button>' : ''}
+    </div>
+    ${cd.configured ? '' : '<div style="margin:2px 0 6px"><button class="approve" onclick="connectClaudeDesignDemo()">Use bundled demo server — no credentials needed</button></div>'}
+    <div class="cite">Discovers the server’s design tools at connect time; every call is scope-checked, rate-limited and audited like any other connector. The bundled demo server speaks the same MCP protocol locally — no Anthropic credentials needed; once connected, the Image Generation Agent creates the campaign hero through it.</div>`;
+
+  // Teams — notifications always land in the in-app feed; a Workflows webhook adds channel delivery.
+  const tm = integ?.teams || { mode: 'in-app', webhookHint: null };
+  const teamsPanel = `
+    <div class="cite" style="margin:10px 0 2px"><b>Microsoft Teams</b> ·
+      ${tm.mode === 'live'
+        ? `<b style="color:var(--green)">live</b> · webhook ${esc(tm.webhookHint)}`
+        : `<b style="color:var(--amber)">in-app feed only</b> — add a Workflows webhook for channel delivery`}</div>
+    <div style="display:flex;gap:6px;margin:6px 0">
+      <input id="tmWebhook" type="password" placeholder="https://…webhook.office.com/…" style="flex:1;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px" autocomplete="off"/>
+      <button class="ghost" onclick="saveTeams()">Connect</button>
+      ${tm.mode === 'live' ? '<button class="ghost" onclick="clearTeams()">In-app only</button>' : ''}
+    </div>
+    <div class="cite">Intake from Teams/Copilot: point an outgoing webhook at <code>POST /api/inbound/teams</code> — the Intake Agent runs the brief interview in the channel (HMAC-verified when <code>TEAMS_OUTGOING_SECRET</code> is set).</div>`;
+
+  const plannedRows = (integ?.planned || []).map(p => `<span class="chip">${esc(p.name)} · ${esc(p.phase)}</span>`).join(' ');
+
+  const sourceRows = ((knowledge && knowledge.sources) || []).map(k =>
+    `<div class="cite" style="margin:3px 0"><b>${esc(k.title)}</b> · ${esc(k.domain)} · v${esc(k.version)} · ${k.chunks} chunk${k.chunks === 1 ? '' : 's'}</div>`).join('')
+    || '<div class="cite">No sources indexed yet.</div>';
+  const knowledgeSection = `${sourceRows}
+    <div class="cite" style="margin:10px 0 4px"><b>Add a document</b> — it is chunked, embedded and immediately retrievable by every agent.</div>
+    <input id="kTitle" placeholder="Title (e.g. TE 60 rotary hammer spec sheet)" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12.5px;margin-bottom:6px"/>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <select id="kDomain" style="padding:6px;border:1px solid var(--line);border-radius:7px;font-size:12px" aria-label="Knowledge domain">
+        <option value="product">Product</option><option value="brand">Brand</option>
+        <option value="market">Market</option><option value="history">History</option>
+      </select>
+      <input id="kVersion" value="1.0" style="width:80px;border:1px solid var(--line);border-radius:7px;padding:6px;font-size:12px" aria-label="Version"/>
+    </div>
+    <textarea id="kText" placeholder="Paste the document text…" style="width:100%;min-height:70px;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12.5px;font-family:inherit;resize:vertical"></textarea>
+    <div style="margin-top:6px"><button class="approve" onclick="ingestKnowledge()">Index document</button></div>`;
+
+  document.getElementById('settings').innerHTML = `
+    <div class="asection"><div class="ahdr">Model gateway</div>${gateway}</div>
+    <div class="asection"><div class="ahdr">Integrations</div>${figmaPanel}${cdPanel}${teamsPanel}
+      <div class="chips" style="margin-top:8px">${plannedRows}</div></div>
+    <div class="asection"><div class="ahdr">Knowledge fabric</div>${knowledgeSection}</div>
+    <div class="asection"><div class="ahdr">Autonomy dial (per stage)</div>${policyRows}
+      <div class="cite" style="margin-top:4px">L2 queues every action for approval; L3 lets agents act within guardrails.</div></div>
+    <div class="asection"><div class="ahdr">Agent catalogue</div>${agentRows}</div>
+    <div class="asection"><div class="ahdr">Quality gates · golden set</div>
+      ${(() => {
+        if (!golden || golden.forbidden) return '<div class="cite">Unavailable.</div>';
+        const g = golden.golden;
+        const banned = g.bannedTerms.map(t =>
+          `<span class="chip fail">${esc(t)} <a href="#" onclick="goldenOp('remove-banned','${esc(t)}');return false" title="Remove">×</a></span>`).join(' ');
+        const offBrand = g.brandVoice.offBrand.map(t =>
+          `<div class="cite" style="margin:2px 0">✗ “${esc(t.slice(0, 70))}${t.length > 70 ? '…' : ''}” <a href="#" onclick="goldenOp('remove-off-brand',this.dataset.t);return false" data-t="${esc(t)}">remove</a></div>`).join('');
+        const suggestions = (golden.suggestions || []).map(su =>
+          `<div class="act"><span class="who">Reviewer rejected: “${esc(su.text.slice(0, 60))}${su.text.length > 60 ? '…' : ''}”</span>
+            <div class="why">${esc(su.reason)} · ${esc(su.source)}</div>
+            <div class="actions" style="margin-top:6px">
+              <button class="approve" data-t="${esc(su.text)}" onclick="goldenOp('accept-suggestion',this.dataset.t)">Add as off-brand exemplar</button>
+              <button class="ghost" data-t="${esc(su.text)}" onclick="goldenOp('dismiss-suggestion',this.dataset.t)">Dismiss</button>
+            </div></div>`).join('');
+        return `
+          <div class="cite" style="margin-bottom:4px"><b>Banned terms</b> — copy containing these fails the brand gate:</div>
+          <div class="chips">${banned || '<span class="cite">none</span>'}</div>
+          <div style="display:flex;gap:6px;margin:6px 0">
+            <input id="gBanned" placeholder="Add a banned term (e.g. unbeatable)" style="flex:1;border:1px solid var(--line);border-radius:7px;padding:6px;font-size:12px"/>
+            <button class="ghost" onclick="goldenOp('add-banned', $('gBanned').value)">Ban term</button>
+          </div>
+          <div class="cite" style="margin:8px 0 4px"><b>Off-brand exemplars</b> — the model-graded evals few-shot on these:</div>
+          ${offBrand || '<div class="cite">none</div>'}
+          ${suggestions ? `<div class="cite" style="margin:10px 0 4px"><b>Adjudications to review</b> — humans overruled the gates (§9.2 feedback loop):</div>${suggestions}` : ''}`;
+      })()}
+    </div>
+    <div class="asection"><div class="ahdr">Guest access (agency partners)</div>
+      ${((guests && guests.campaigns) || []).map(c => {
+        const on = (guests.assigned || []).includes(c.id);
+        return `<div class="arow"><span>${esc(c.objective.slice(0, 60))}</span>
+          <button class="ghost" onclick="setGuestAccess('${c.id}', ${!on})">${on ? 'Shared · revoke' : 'Share with agency'}</button></div>`;
+      }).join('') || '<div class="cite">No campaigns yet.</div>'}
+      <div class="cite" style="margin-top:4px">Agency partners see and touch only the campaigns shared here (§5.1 scoped guest workspace).</div></div>`;
+}
+async function goldenOp(op, text) {
+  text = (text || '').trim();
+  if (!text) { toast('Enter the text first.'); return; }
+  const r = await api('POST', '/api/admin/golden', { op, text });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast(op.startsWith('accept') ? 'Added to the golden set — future grading anchors on it.' : 'Golden set updated.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function setGuestAccess(campaignId, allowed) {
+  const r = await api('POST', '/api/admin/guest-access', { campaignId, allowed });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast(allowed ? 'Shared with the agency workspace.' : 'Agency access revoked.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function saveTeams() {
+  const webhookUrl = $('tmWebhook').value.trim();
+  if (!webhookUrl) { toast('Paste the Teams Workflows webhook URL.'); return; }
+  const r = await api('POST', '/api/settings/teams', { webhookUrl });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast('Teams connected — notifications now post to the channel.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function clearTeams() {
+  await api('POST', '/api/settings/teams', { webhookUrl: '' });
+  toast('Teams reverted to the in-app feed.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function saveFigma() {
+  const token = $('figToken').value.trim(), fileKey = $('figFile').value.trim();
+  if (!token || !fileKey) { toast('Enter both a Figma token and the file key.'); return; }
+  const r = await api('POST', '/api/settings/figma', { token, fileKey });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast('Figma connected live — boards now read your real file.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function clearFigma() {
+  await api('POST', '/api/settings/figma', { token: '', fileKey: '' });
+  toast('Figma reverted to the built-in mock board.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function connectClaudeDesign() {
+  const endpoint = $('cdEndpoint').value.trim(), token = $('cdToken').value.trim();
+  if (!token) { toast('Enter a bearer token for the Claude Design MCP server.'); return; }
+  const r = await api('POST', '/api/settings/claude-design', { endpoint, token });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast(`Claude Design connected — ${r.tools.length} design tool${r.tools.length === 1 ? '' : 's'} discovered.`, true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function disconnectClaudeDesign() {
+  await api('POST', '/api/settings/claude-design', { token: '' });
+  toast('Claude Design disconnected.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+// One-click connect to the bundled local MCP server — same protocol, no credentials.
+async function connectClaudeDesignDemo() {
+  const r = await api('POST', '/api/settings/claude-design', {
+    endpoint: location.origin + '/mcp/claude-design', token: 'demo-local',
+  });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast(`Claude Design connected (local demo server) — ${r.tools.length} design tools discovered.`, true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function ingestKnowledge() {
+  const title = $('kTitle').value.trim();
+  const text = $('kText').value.trim();
+  if (!title || !text) { toast('Enter a title and the document text.'); return; }
+  const r = await api('POST', '/api/admin/knowledge', {
+    title, text, domain: $('kDomain').value, version: $('kVersion').value.trim() || '1.0',
+  });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  const flagged = Object.values(r.ingested.safety || {}).reduce((a, b) => a + b, 0);
+  toast(flagged
+    ? `Indexed “${title}” — ${flagged} item(s) redacted/neutralised by the safety sweep before indexing.`
+    : `Indexed “${title}” (${r.ingested.chunks} chunk${r.ingested.chunks === 1 ? '' : 's'}) — agents can now cite it.`, true);
+  if (document.activeElement) document.activeElement.blur(); // release the typing guard
+  renderSettings(true);
+}
+async function setAutonomy(role, stage, autonomy) {
+  const r = await api('POST', '/api/admin/policy', { role, stage, autonomy });
+  if (r && r.error) { toast(r.error); return; }
+  toast('Autonomy level updated.', true);
+}
+
+// ── Intake wizard (interview by default, form as fallback — spec §6.0) ────────
+let interviewSession = null;
+
+function wChatMsg(text, who) {
+  const el = document.createElement('div');
+  el.className = `msg ${who}`;
+  el.textContent = text;
+  $('wChatLog').appendChild(el);
+  $('wChatLog').scrollTop = 1e9;
+}
+function setWizardMode(mode) {
+  $('wChat').style.display = mode === 'chat' ? '' : 'none';
+  $('wFormPane').style.display = mode === 'form' ? '' : 'none';
+  $('wTabChat').classList.toggle('active', mode === 'chat');
+  $('wTabForm').classList.toggle('active', mode === 'form');
+  if (mode === 'chat') $('wChatInput').focus(); else $('wObjective').focus();
+}
+async function openWizard() {
+  $('wObjective').value = '';
+  $('wMarkets').value = 'DE, AT, CH, US';
+  $('wBudget').value = '250000';
+  $('wCurrency').value = 'EUR';
+  $('wMetric').value = 'Qualified leads';
+  $('wClaims').value = '';
+  $('wChatLog').innerHTML = '';
+  $('wChatInput').value = '';
+  interviewSession = null;
+  editing = '__wizard__'; // pause the live refresh while the modal is open
+  $('wizard').style.display = 'flex';
+  setWizardMode('chat');
+  const r = await api('POST', '/api/intake/start');
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); setWizardMode('form'); return; }
+  interviewSession = r.sessionId;
+  wChatMsg(r.message, 'astra');
+}
+$('wChatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('wChatInput').value.trim();
+  if (!text || !interviewSession) return;
+  wChatMsg(text, 'me');
+  $('wChatInput').value = '';
+  const r = await api('POST', `/api/intake/${interviewSession}/reply`, { text });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Something went wrong.'); return; }
+  wChatMsg(r.message, 'astra');
+  if (r.done && r.campaignId) {
+    closeWizard();
+    current = r.campaignId;
+    await loadPortfolio();
+    setView('campaign');
+    toast('Campaign created — intake brief drafted from the interview.', true);
+  }
+});
+function closeWizard() { $('wizard').style.display = 'none'; editing = null; }
+async function submitWizard() {
+  const objective = $('wObjective').value.trim();
+  if (!objective) { toast('Enter an objective.'); return; }
+  const payload = {
+    objective,
+    markets: $('wMarkets').value,
+    budget: Number($('wBudget').value) || 0,
+    currency: $('wCurrency').value.trim() || 'EUR',
+    successMetric: $('wMetric').value.trim(),
+    mandatoryClaims: $('wClaims').value.trim(),
+  };
+  const r = await api('POST', '/api/campaigns', payload);
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  closeWizard();
+  current = r.id;
+  await loadPortfolio();
+  setView('campaign');
+  toast('Campaign created — intake brief drafted from your inputs.', true);
+}
+async function saveKey() {
+  const apiKey = (document.getElementById('keyInput').value || '').trim();
+  if (!apiKey) { toast('Enter a key, or click “Use mock”.'); return; }
+  const r = await api('POST', '/api/settings/anthropic-key', { apiKey });
+  if (r.error) { toast(r.error); return; }
+  toast('Key saved — reasoning now routes through Claude.', true);
+  if (document.activeElement) document.activeElement.blur();
+  refresh();
+}
+async function clearKey() {
+  await api('POST', '/api/settings/anthropic-key', { apiKey: '' });
+  toast('Reverted to the mock provider.', true);
+  if (document.activeElement) document.activeElement.blur();
+  refresh();
+}
+async function renderNotifications() {
+  const items = await api('GET', '/api/notifications');
+  if (!Array.isArray(items)) return;
+  $('notifs').innerHTML = items.length
+    ? items.slice(0, 8).map(n => {
+        const when = new Date(n.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `<div class="act"><span class="who">${esc(n.title)}</span>
+          <span class="cite" style="float:right">${esc(when)} · ${n.delivered ? 'Teams' : 'in-app'}</span>
+          <div class="why">${esc(n.body)}</div></div>`;
+      }).join('')
+    : '<div class="empty">Workflow notifications appear here (and in Teams when connected).</div>';
+}
+async function refresh() {
+  if (current) render(await api('GET', `/api/campaigns/${current}`));
+  await loadPortfolio();
+  await renderNotifications();
+}
+async function runStage() { afterAction(await api('POST', `/api/campaigns/${current}/run-stage`)); await loadPortfolio(); }
+async function approve(id) { afterAction(await api('POST', `/api/campaigns/${current}/approve`, {artifactId:id})); await loadPortfolio(); }
+async function revise(id) {
+  const feedback = prompt('What should change? The agent will redraft this item using your feedback.', 'Tighten the headline and lead with uptime.');
+  if (feedback === null) return;
+  const r = await api('POST', `/api/campaigns/${current}/revise`, { artifactId: id, feedback });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  render(r.view);
+  toast(r.revised ? 'Sent back for revision — a new draft is in your queue.' : 'Change request recorded.', true);
+  await loadPortfolio();
+}
+async function advance() { afterAction(await api('POST', `/api/campaigns/${current}/advance`)); await loadPortfolio(); }
+async function figmaEdit() { const frame = $('frameSel').value; const content = $('frameVal').value || 'Zero downtime. Total control.'; afterAction(await api('POST', `/api/campaigns/${current}/figma-edit`, {frame, content})); }
+async function goLive() {
+  if (!confirm('Go live now? This executes the approved deployments — publish, send and launch are irreversible.')) return;
+  const r = await api('POST', `/api/campaigns/${current}/golive`);
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  render(r.view);
+  toast(`Live — executed ${r.executed.length} deployment(s): ${r.executed.map(e => e.system).join(', ')}.`, true);
+  await loadPortfolio();
+}
+
+function chatLog(text, who) { const el = document.createElement('div'); el.className = `msg ${who}`; el.textContent = text; $('chatlog').appendChild(el); $('chatlog').scrollTop = 1e9; }
+$('chatform').addEventListener('submit', async (e) => {
+  e.preventDefault(); const text = $('chatinput').value.trim(); if (!text) return;
+  chatLog(text, 'me'); $('chatinput').value = '';
+  const r = await api('POST', `/api/campaigns/${current}/command`, {text});
+  chatLog(r.reply, 'astra'); render(r.view); await loadPortfolio();
+});
+$('navPortfolio').addEventListener('click', () => setView('portfolio'));
+$('navCampaign').addEventListener('click', () => setView('campaign'));
+$('navPerformance').addEventListener('click', () => setView('performance'));
+$('navLocalisation').addEventListener('click', () => setView('localisation'));
+// A role's home surface sets a sensible default view (§5.1).
+function homeViewFor(role) {
+  if (role === 'marketing-leader') return 'portfolio';
+  if (role === 'performance-marketer' || role === 'analyst') return 'performance';
+  if (role === 'localisation') return 'localisation';
+  return 'campaign';
+}
+// ── Command palette (§8.4 — keyboard-first navigation and actions) ────────────
+let paletteSel = 0;
+function paletteActions() {
+  const acts = [
+    { label: 'Go to Campaign canvas', hint: 'navigate', run: () => setView('campaign') },
+    { label: 'Go to Portfolio', hint: 'navigate', run: () => setView('portfolio') },
+    { label: 'Go to Performance', hint: 'navigate', run: () => setView('performance') },
+    { label: 'Go to Localisation Workbench', hint: 'navigate', run: () => setView('localisation') },
+  ];
+  const v = lastView && lastView.viewer;
+  if (v && v.canRunAgents) acts.push({ label: 'Run current stage', hint: 'action', run: () => { setView('campaign'); runStage(); } });
+  if (v) acts.push({ label: 'Approve everything in my queue', hint: 'action', run: async () => {
+    const r = await api('POST', `/api/campaigns/${current}/command`, { text: 'approve all' });
+    if (r && r.reply) toast(r.reply, true); refresh();
+  }});
+  if (v && v.canAdvance) acts.push({ label: 'Advance to next stage', hint: 'action', run: () => { setView('campaign'); advance(); } });
+  if (v && v.canGoLive && lastView.campaign.currentStage === 'rollout') acts.push({ label: 'Go live', hint: 'irreversible', run: () => { setView('campaign'); goLive(); } });
+  acts.push({ label: 'New campaign (intake)', hint: 'action', run: openWizard });
+  for (const opt of document.querySelectorAll('#roleSel option')) {
+    if (opt.value !== currentRole) acts.push({ label: `Act as ${opt.textContent}`, hint: 'role', run: () => { currentRole = opt.value; $('roleSel').value = opt.value; setView(homeViewFor(currentRole)); } });
+  }
+  for (const opt of document.querySelectorAll('#picker option')) {
+    if (opt.value !== current) acts.push({ label: `Open ${opt.textContent}`, hint: 'campaign', run: () => { current = opt.value; $('picker').value = opt.value; refresh(); } });
+  }
+  return acts;
+}
+function paletteFilter() {
+  const q = $('paletteInput').value.trim().toLowerCase();
+  const terms = q.split(/\s+/).filter(Boolean);
+  return paletteActions().filter(a => terms.every(t => a.label.toLowerCase().includes(t)));
+}
+function renderPalette() {
+  const items = paletteFilter();
+  paletteSel = Math.min(paletteSel, Math.max(0, items.length - 1));
+  $('paletteList').innerHTML = items.length
+    ? items.map((a, i) => `<div class="pitem ${i === paletteSel ? 'sel' : ''}" data-i="${i}">${esc(a.label)}<span class="hint">${esc(a.hint)}</span></div>`).join('')
+    : '<div class="pitem"><span class="cite">No matching commands.</span></div>';
+  [...document.querySelectorAll('#paletteList .pitem')].forEach(el =>
+    el.addEventListener('click', () => runPaletteItem(Number(el.dataset.i))));
+}
+function openPalette() { paletteSel = 0; $('paletteInput').value = ''; $('palette').style.display = 'block'; renderPalette(); $('paletteInput').focus(); }
+function closePalette() { $('palette').style.display = 'none'; }
+function runPaletteItem(i) { const items = paletteFilter(); const a = items[i]; closePalette(); if (a) a.run(); }
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+  if ($('palette').style.display !== 'block') return;
+  if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); paletteSel++; renderPalette(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); paletteSel = Math.max(0, paletteSel - 1); renderPalette(); }
+  else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(paletteSel); }
+});
+$('paletteInput').addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+$('palette').addEventListener('click', (e) => { if (e.target === $('palette')) closePalette(); });
+
+$('roleSel').addEventListener('change', (e) => { currentRole = e.target.value; setView(homeViewFor(currentRole)); });
+$('picker').addEventListener('change', (e) => { current = e.target.value; if (appView === 'performance') renderPerformance(); else refresh(); });
+$('newBtn').addEventListener('click', openWizard);
+
+// Pause the live refresh while editing; keep whichever view is open up to date.
+(async () => {
+  await loadRoles(); await loadPortfolio();
+  setView(homeViewFor(currentRole));
+  setInterval(() => {
+    if (editing !== null) return;
+    if (Object.values(mentionOpen).some(Boolean)) return; // don't wipe a hand-off mid-typing
+    if (appView === 'campaign') refresh();
+    else if (appView === 'performance') renderPerformance();
+    else if (appView === 'localisation') renderLocalisation();
+    else renderPortfolio();
+  }, 5000);
+})();
+</script>
+</body>
+</html>

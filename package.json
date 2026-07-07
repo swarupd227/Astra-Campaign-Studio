@@ -1,0 +1,35 @@
+{
+  "name": "astra-campaign-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Astra Campaign Studio — M0 Foundation runtime (campaign object, orchestration, model gateway, governance, grounding, evals).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "demo": "tsx scripts/demo.ts",
+    "walkthrough": "tsx scripts/roleWalkthrough.ts",
+    "serve": "tsx src/experience/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "demo:video": "playwright test -c playwright.demo.config.ts && powershell -ExecutionPolicy Bypass -File scripts/make-demo.ps1"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
