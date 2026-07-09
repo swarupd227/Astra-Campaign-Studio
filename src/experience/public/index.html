@@ -172,6 +172,9 @@
   .movebadge.waiting { background: #fdf3e0; color: var(--amber); }
   /* localisation workbench */
   #localisationView { padding: 16px 20px; }
+  #studioView { padding: 16px 20px; }
+  .sgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; margin-top: 14px; align-items: start; }
+  #studioFigmaCard { margin-top: 14px; }
   .locpair { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 12px; }
   .loccols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
   .loccol h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
@@ -224,6 +227,7 @@
   <nav class="viewnav">
     <button id="navPortfolio" class="navbtn">Portfolio</button>
     <button id="navCampaign" class="navbtn active">Campaign</button>
+    <button id="navStudio" class="navbtn">Studio</button>
     <button id="navPerformance" class="navbtn">Performance</button>
     <button id="navLocalisation" class="navbtn">Localisation</button>
   </nav>
@@ -248,7 +252,7 @@
     <div class="card" id="settingsCard" style="display:none"><h2>Model gateway · admin</h2><div class="pad" id="settings"></div></div>
     <div class="card chat"><h2>Command rail</h2><div class="pad">
       <div class="log" id="chatlog"></div>
-      <form id="chatform"><input id="chatinput" placeholder="e.g. run stage · approve all · advance" autocomplete="off"/><button class="ghost">Send</button></form>
+      <form id="chatform"><input id="chatinput" placeholder="e.g. run stage · status · add a LinkedIn variant for DACH" autocomplete="off"/><button class="ghost">Send</button></form>
     </div></div>
     <div class="card" id="handoffsCard" style="display:none"><h2>Your hand-offs</h2><div class="pad" id="handoffs"></div></div>
     <div class="card"><h2>Notifications</h2><div class="pad" id="notifs"></div></div>
@@ -258,6 +262,7 @@
 
 <section id="portfolioView" style="display:none">
   <div class="kpis" id="pKpis"></div>
+  <div class="card"><h2>Review &amp; approvals — your inbox</h2><div class="pad" id="pInbox"></div></div>
   <div class="pgrid">
     <div class="card"><h2>Pipeline by stage</h2><div class="pad" id="pPipeline"></div></div>
     <div class="card"><h2>Cycle time by stage</h2><div class="pad" id="pCycle"></div></div>
@@ -279,6 +284,12 @@
 
 <section id="localisationView" style="display:none">
   <div class="card"><h2>Localisation Workbench — source vs. market adaptation</h2><div class="pad" id="locPairs"></div></div>
+</section>
+
+<section id="studioView" style="display:none">
+  <div class="card"><h2>Asset Studio — create &amp; refine</h2><div class="pad" id="studioIntro"></div></div>
+  <div id="studioGrid" class="sgrid"></div>
+  <div class="card" id="studioFigmaCard" style="display:none"><h2>Figma board</h2><div class="pad" id="studioFigma"></div></div>
 </section>
 
 <div id="wizard" class="modal" style="display:none">
@@ -527,9 +538,11 @@ function setView(v) {
   appView = v;
   $('navPortfolio').classList.toggle('active', v === 'portfolio');
   $('navCampaign').classList.toggle('active', v === 'campaign');
+  $('navStudio').classList.toggle('active', v === 'studio');
   $('navPerformance').classList.toggle('active', v === 'performance');
   $('navLocalisation').classList.toggle('active', v === 'localisation');
   document.querySelector('main').style.display = v === 'campaign' ? '' : 'none';
+  $('studioView').style.display = v === 'studio' ? '' : 'none';
   $('portfolioView').style.display = v === 'portfolio' ? '' : 'none';
   $('performanceView').style.display = v === 'performance' ? '' : 'none';
   $('localisationView').style.display = v === 'localisation' ? '' : 'none';
@@ -681,6 +694,7 @@ function openCampaign(id) { current = id; $('picker').value = id; setView('campa
 async function renderPortfolio() {
   const p = await api('GET', '/api/portfolio');
   if (!p || p.error) return;
+  renderInbox(); // §8.2: the unified review inbox loads alongside the portfolio
   const t = p.totals;
   $('pKpis').innerHTML = [
     kpi(t.activeCampaigns, 'Active campaigns', `${t.campaigns} total`),
@@ -717,6 +731,38 @@ async function renderPortfolio() {
      <div class="stub" style="margin-top:8px">Live spend, media efficiency and ROI connect in MVP-2 (finance &amp; analytics integrations).</div>`;
 }
 
+// ── Unified Review & Approvals inbox (§8.2): one queue across every campaign ──
+async function renderInbox() {
+  const r = await api('GET', '/api/review-inbox');
+  const items = (r && r.items) || [];
+  if (!items.length) {
+    $('pInbox').innerHTML = '<div class="cite">Nothing awaits your sign-off. Items appear here the moment any campaign produces work only your role can approve.</div>';
+    return;
+  }
+  $('pInbox').innerHTML = items.map(i => `
+    <div class="deliv">
+      <span class="chip dfmt">${esc(i.stageLabel)}</span>
+      <div class="dmain">
+        <b>${esc(i.title)}</b>${i.version > 1 ? ` <span class="ver">v${i.version}</span>` : ''}
+        <div class="cite">${esc(i.objective.length > 70 ? i.objective.slice(0, 70) + '…' : i.objective)} · drafted by ${esc(i.author)}</div>
+      </div>
+      <button class="approve dload" data-c="${i.campaignId}" data-a="${i.artifactId}" onclick="inboxApprove(this)">Approve</button>
+      <button class="ghost dload" data-c="${i.campaignId}" onclick="inboxOpen(this)">Open</button>
+    </div>`).join('') +
+    `<div class="cite" style="margin-top:8px">${items.length} item(s) across the portfolio await your sign-off — approving here is identical to approving on the canvas.</div>`;
+}
+async function inboxApprove(btn) {
+  const r = await api('POST', `/api/campaigns/${btn.dataset.c}/approve`, { artifactId: btn.dataset.a, note: 'Approved from the review inbox' });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted for this role.'); return; }
+  toast('Approved.', true);
+  await renderInbox();
+}
+function inboxOpen(btn) {
+  current = btn.dataset.c;
+  $('picker').value = current;
+  setView('campaign');
+}
+
 async function loadPortfolio() {
   const rows = await api('GET', '/api/mission-control');
   const picker = $('picker');
@@ -746,7 +792,9 @@ function artifactCard(a) {
   const sources = a.citations.length
     ? `<div class="cite">Sources: ${a.citations.map(c=>esc(c.title)).join(', ')}</div>` : '';
   const bodyHtml = renderBody(a.body);
-  const isOpen = (a.id in bodyOpen) ? bodyOpen[a.id] : (a.status === 'in-review');
+  // Default open while awaiting review — and always in the Asset Studio, where
+  // the content IS the workbench (§8.2).
+  const isOpen = (a.id in bodyOpen) ? bodyOpen[a.id] : (a.status === 'in-review' || appView === 'studio');
   const toggle = bodyHtml ? `<button class="linkbtn" onclick="toggleBody('${a.id}')">${isOpen ? 'Hide content' : 'View content'}</button>` : '';
   const editable = viewerCanEdit && a.status !== 'superseded' && a.status !== 'rejected';
   const editLink = editable ? `<button class="linkbtn" onclick="enterEdit('${a.id}')">Edit</button>` : '';
@@ -832,13 +880,18 @@ function render(view) {
      <div><span>Budget:</span> ${c.currency} ${c.budget.toLocaleString()}</div>
      <div><span>KPIs:</span> ${c.kpis.map(esc).join(', ')}</div>`;
 
-  // group artifacts by stage
-  const groups = {};
-  for (const a of view.artifacts) (groups[a.stage] ??= []).push(a);
-  $('artifacts').innerHTML = Object.keys(groups).length
-    ? Object.entries(groups).map(([st, arts]) =>
-        `<div class="stagegroup"><h3>${esc(label(STAGE_LABEL, st))}</h3>${arts.map(artifactCard).join('')}</div>`).join('')
-    : '<div class="empty">No items yet — run the current stage to generate work.</div>';
+  // Group artifacts by stage. Interactive cards render in exactly ONE surface at
+  // a time (canvas or Asset Studio) so per-artifact element ids stay unique.
+  if (appView === 'studio') {
+    $('artifacts').innerHTML = '';
+  } else {
+    const groups = {};
+    for (const a of view.artifacts) (groups[a.stage] ??= []).push(a);
+    $('artifacts').innerHTML = Object.keys(groups).length
+      ? Object.entries(groups).map(([st, arts]) =>
+          `<div class="stagegroup"><h3>${esc(label(STAGE_LABEL, st))}</h3>${arts.map(artifactCard).join('')}</div>`).join('')
+      : '<div class="empty">No items yet — run the current stage to generate work.</div>';
+  }
 
   const active = view.stageRail.find(s => s.state === 'active');
   const gateReady = active && active.gate && active.gate.satisfied;
@@ -875,7 +928,36 @@ function render(view) {
 
   renderFigma(view);
   renderDeliverables(view);
+  renderStudio(view);
   renderSettings(view.viewer.canAdmin);
+}
+
+// ── Asset Studio (§8.2): the creator/designer workbench ───────────────────────
+function renderStudio(view) {
+  const grid = $('studioGrid');
+  if (appView !== 'studio') { grid.innerHTML = ''; $('studioFigmaCard').style.display = 'none'; return; }
+  const items = view.artifacts.filter(a =>
+    (a.kind === 'content-item' || a.kind === 'asset') &&
+    a.status !== 'superseded' && a.status !== 'rejected' && a.title !== 'Figma board');
+  $('studioIntro').innerHTML = items.length
+    ? `Draft, refine and hand off the campaign's content — grouped by channel. Every edit becomes a new version through the same quality gates. <span class="cite">${items.length} active item(s) · ${esc(label(STAGE_SHORT, view.campaign.currentStage))} stage</span>`
+    : 'No content to refine yet — copy, imagery and pages arrive here once the Creation stage runs.';
+  const groups = {};
+  for (const a of items) {
+    const ch = a.kind === 'asset' ? 'Imagery & assets' : humanKey(String(a.body.channel || 'Other'));
+    (groups[ch] ??= []).push(a);
+  }
+  grid.innerHTML = Object.entries(groups).map(([ch, arts]) =>
+    `<div class="card"><h2>${esc(ch)}</h2><div class="pad">${arts.map(artifactCard).join('')}</div></div>`).join('');
+
+  // The board alongside the work (read-only here; sync lives on the canvas).
+  const board = view.artifacts.filter(a => a.title === 'Figma board' && a.status !== 'superseded' && a.status !== 'rejected').pop();
+  $('studioFigmaCard').style.display = board ? '' : 'none';
+  if (board) {
+    const frames = board.body.frames || {};
+    $('studioFigma').innerHTML = Object.entries(frames).map(([f, v]) =>
+      `<div class="frame"><div class="fname">${esc(label(FRAME_LABEL, f))}</div><div class="fval ${v ? '' : 'empty'}">${v ? (isImageUrl(v) ? imagePreview(v, true) : esc(v)) : 'Empty placeholder'}</div></div>`).join('');
+  }
 }
 
 // ── Deliverables (§9): decks & workbooks rendered live from the campaign ──────
@@ -1355,15 +1437,19 @@ $('chatform').addEventListener('submit', async (e) => {
   const r = await api('POST', `/api/campaigns/${current}/command`, {text});
   chatLog(r.reply, 'astra'); render(r.view); await loadPortfolio();
 });
-$('navPortfolio').addEventListener('click', () => setView('portfolio'));
-$('navCampaign').addEventListener('click', () => setView('campaign'));
-$('navPerformance').addEventListener('click', () => setView('performance'));
-$('navLocalisation').addEventListener('click', () => setView('localisation'));
+// Explicit navigation wins over the async init's role-home default (no clobbering).
+let userNavigated = false;
+$('navPortfolio').addEventListener('click', () => { userNavigated = true; setView('portfolio'); });
+$('navCampaign').addEventListener('click', () => { userNavigated = true; setView('campaign'); });
+$('navPerformance').addEventListener('click', () => { userNavigated = true; setView('performance'); });
+$('navLocalisation').addEventListener('click', () => { userNavigated = true; setView('localisation'); });
+$('navStudio').addEventListener('click', () => { userNavigated = true; setView('studio'); });
 // A role's home surface sets a sensible default view (§5.1).
 function homeViewFor(role) {
   if (role === 'marketing-leader') return 'portfolio';
   if (role === 'performance-marketer' || role === 'analyst') return 'performance';
   if (role === 'localisation') return 'localisation';
+  if (role === 'creator') return 'studio'; // §8.2: the Asset Studio is the creator home
   return 'campaign';
 }
 // ── Command palette (§8.4 — keyboard-first navigation and actions) ────────────
@@ -1371,6 +1457,7 @@ let paletteSel = 0;
 function paletteActions() {
   const acts = [
     { label: 'Go to Campaign canvas', hint: 'navigate', run: () => setView('campaign') },
+    { label: 'Go to Asset Studio', hint: 'navigate', run: () => setView('studio') },
     { label: 'Go to Portfolio', hint: 'navigate', run: () => setView('portfolio') },
     { label: 'Go to Performance', hint: 'navigate', run: () => setView('performance') },
     { label: 'Go to Localisation Workbench', hint: 'navigate', run: () => setView('localisation') },
@@ -1427,11 +1514,12 @@ $('newBtn').addEventListener('click', openWizard);
 // Pause the live refresh while editing; keep whichever view is open up to date.
 (async () => {
   await loadRoles(); await loadPortfolio();
-  setView(homeViewFor(currentRole));
+  // Don't clobber a view the user already navigated to while we were loading.
+  setView(userNavigated ? appView : homeViewFor(currentRole));
   setInterval(() => {
     if (editing !== null) return;
     if (Object.values(mentionOpen).some(Boolean)) return; // don't wipe a hand-off mid-typing
-    if (appView === 'campaign') refresh();
+    if (appView === 'campaign' || appView === 'studio') refresh();
     else if (appView === 'performance') renderPerformance();
     else if (appView === 'localisation') renderLocalisation();
     else renderPortfolio();

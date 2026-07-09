@@ -194,6 +194,44 @@ route("GET", "/api/portfolio", async (_req, res) => {
   json(res, 200, await astra.portfolio());
 });
 
+// Unified Review & Approvals inbox (spec §8.2): everything awaiting THIS role's
+// sign-off, across every campaign the role can see — one queue, with context.
+route("GET", "/api/review-inbox", async (req, res) => {
+  const role = viewerRole(req);
+  const ids = (await astra.store.listCampaigns()).filter((id) => astra.guests.isAllowed(role, id));
+  const items: {
+    campaignId: string;
+    objective: string;
+    stage: string;
+    stageLabel: string;
+    artifactId: string;
+    title: string;
+    kind: string;
+    version: number;
+    author: string;
+  }[] = [];
+  for (const id of ids) {
+    const view = await astra.canvas(id, role);
+    if (!view) continue;
+    for (const artId of view.reviewQueue) {
+      const a = view.artifacts.find((x) => x.id === artId);
+      if (!a) continue;
+      items.push({
+        campaignId: id,
+        objective: view.campaign.objective,
+        stage: a.stage,
+        stageLabel: stageLabel(a.stage as Stage),
+        artifactId: a.id,
+        title: a.title,
+        kind: a.kind,
+        version: a.version,
+        author: a.author, // projected as a display name
+      });
+    }
+  }
+  json(res, 200, { items });
+});
+
 // ── Notifications (spec §8.4) — in-app feed + governed Teams delivery ─────────
 const notifier = new NotificationService(astra.connectors);
 
@@ -858,8 +896,39 @@ route("POST", "/api/campaigns/:id/command", async (req, res, p, body) => {
       const ok = await astra.orchestrator.advanceStage(p.id!, actor);
       reply = ok ? "Advanced to the next stage." : "Cannot advance yet — the stage gate isn't satisfied.";
     }
+  // §8.3 natural language: "add a LinkedIn variant for the DACH market" — intent
+  // maps to the specialist agent; authority and gates apply exactly as always.
+  } else if (/linkedin/.test(text) && /(variant|version|post|copy|adapt|add|create|draft)/.test(text)) {
+    const d = astra.access.canRunAgents(actor.role);
+    if (!d.allowed) reply = d.reason;
+    else {
+      const agent = getAgentByName("Content Multiplier Agent")!;
+      const result = await astra.orchestrator.runAgent(p.id!, agent);
+      reply = `Drafted “${result.artifact.title}” with the Content Multiplier Agent — it's in the review queue, gates already run.`;
+    }
+  } else if (/\b(de|german|germany|dach)\b/.test(text) && /(variant|market|localis|translat|transcreat|adapt)/.test(text)) {
+    const d = astra.access.canRunAgents(actor.role);
+    if (!d.allowed) reply = d.reason;
+    else {
+      const agent = getAgentByName("Localisation / Transcreation Agent")!;
+      const result = await astra.orchestrator.runAgent(p.id!, agent);
+      reply = `Drafted “${result.artifact.title}” with the Localisation Agent — transcreated for the market, awaiting review (localisation-equivalence gate already run).`;
+    }
+  } else if (/(status|where are we|summary|progress|how far)/.test(text)) {
+    const view = await astra.canvas(p.id!, actor.role);
+    if (!view) reply = "I can't find that campaign.";
+    else {
+      const active = view.stageRail.find((s) => s.state === "active");
+      const gate = active?.gate?.satisfied
+        ? "the stage gate is satisfied — ready to advance"
+        : `still needed: ${(active?.gate?.missing ?? []).join(", ") || "nothing"}`;
+      reply =
+        `“${view.campaign.objective}” is in ${stageLabel(view.campaign.currentStage)}: ` +
+        `${view.artifacts.length} item(s) so far, ${view.reviewQueue.length} awaiting your sign-off, and ${gate}.`;
+    }
   } else {
-    reply = "Try: “run stage”, “approve all”, or “advance”.";
+    reply =
+      "Try: “run stage”, “approve all”, “advance”, “status” — or instruct me, e.g. “add a LinkedIn variant for the DACH market”.";
   }
   json(res, 200, { reply, view: await astra.canvas(p.id!, actor.role) });
 });

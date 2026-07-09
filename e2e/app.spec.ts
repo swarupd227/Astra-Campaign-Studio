@@ -102,6 +102,12 @@ test.describe.serial("Astra Campaign Studio", () => {
   test("a Creator can edit content inline, creating a new version", async ({ page }) => {
     await page.goto("/");
     await page.selectOption("#roleSel", "creator");
+    // §8.2: the Asset Studio is the creator's home surface. The seeded campaign is
+    // still at intake, so the studio shows its empty state; the edit below happens
+    // on the canvas.
+    await expect(page.locator("#studioView")).toBeVisible();
+    await expect(page.locator("#studioIntro")).toContainText("No content to refine yet");
+    await page.click("#navCampaign");
     await expect(page.locator("#actions")).toContainText("Signed in as Creator");
 
     const editLink = page.locator("#artifacts .linkbtn", { hasText: "Edit" }).first();
@@ -347,6 +353,42 @@ test.describe.serial("Astra Campaign Studio", () => {
     expect((await res.body()).length).toBeGreaterThan(10_000);
   });
 
+  test("the unified review inbox aggregates sign-offs across campaigns (§8.2)", async ({ page }) => {
+    await page.goto("/");
+    // Campaign Manager owns intake approvals — the seeded queue appears in the inbox.
+    await page.click("#navPortfolio");
+    await expect(page.locator("#pInbox")).toContainText("Campaign brief");
+    await expect(page.locator("#pInbox")).toContainText("await your sign-off");
+    // "Open" jumps straight to the campaign canvas.
+    await page.locator("#pInbox button", { hasText: "Open" }).first().click();
+    await expect(page.locator("#artifacts")).toBeVisible();
+  });
+
+  test("the command rail understands natural-language instructions (§8.3)", async ({ page }) => {
+    await page.goto("/");
+    // Own campaign, so the shared seeded lineage stays untouched.
+    await page.click("#newBtn");
+    await page.click("#wTabForm");
+    await page.fill("#wObjective", "Promote the DX 6 nail gun to steel framers");
+    await page.click("#wFormPane button.approve");
+    await expect(page.locator("#wizard")).toBeHidden();
+    await expect(page.locator("#meta")).toContainText("DX 6");
+
+    const command = async (text: string) => {
+      const before = await page.locator("#chatlog .msg.astra").count();
+      await page.fill("#chatinput", text);
+      await page.locator("#chatform button").click();
+      await expect(page.locator("#chatlog .msg.astra")).toHaveCount(before + 1, { timeout: 60_000 });
+    };
+    // The §8.3 example, verbatim: intent → specialist agent → review queue.
+    await command("Add a LinkedIn variant for the DACH market");
+    await expect(page.locator("#chatlog")).toContainText("Content Multiplier Agent");
+    await expect(page.locator("#artifacts")).toContainText("LinkedIn variant");
+    // Conversational status.
+    await command("status");
+    await expect(page.locator("#chatlog")).toContainText("awaiting your sign-off");
+  });
+
   test("Campaign Manager approves an item and the review queue shrinks (HITL)", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#actions")).toContainText("Signed in as Campaign Manager");
@@ -364,6 +406,11 @@ test.describe.serial("Astra Campaign Studio", () => {
     await page.goto("/");
     await page.selectOption("#roleSel", "marketing-ops"); // run/approve/advance/go-live authority
     await expect(page.locator("#actions")).toContainText("Signed in as Marketing Ops");
+    // Drive the SEEDED campaign explicitly — earlier tests create their own campaigns
+    // and the picker default is not guaranteed to be the seeded one.
+    const seededOption = page.locator("#picker option", { hasText: "cordless tool platform" });
+    await page.selectOption("#picker", (await seededOption.getAttribute("value"))!);
+    await expect(page.locator("#meta")).toContainText("cordless tool platform");
 
     const command = async (text: string) => {
       // Wait for the REPLY to arrive before the next command — otherwise commands
@@ -395,6 +442,15 @@ test.describe.serial("Astra Campaign Studio", () => {
     // and the Figma board renders the actual artwork — not a file path.
     await expect(page.locator("#artifacts")).toContainText("Generated the hero via Claude Design");
     await expect(page.locator("#figmaCard img.assetpreview").first()).toBeVisible();
+
+    // Asset Studio (§8.2): the creator workbench shows the content by channel,
+    // artwork included, with the same edit/mention cards as the canvas.
+    await page.click("#navStudio");
+    await expect(page.locator("#studioGrid")).toContainText("Paid social");
+    await expect(page.locator("#studioGrid")).toContainText("Imagery & assets");
+    await expect(page.locator("#studioGrid img.assetpreview").first()).toBeVisible();
+    await expect(page.locator("#studioFigmaCard")).toBeVisible();
+    await page.click("#navCampaign");
 
     // Stage 4: prepare deployments, approve, then the go-live authority appears.
     await command("run stage");
