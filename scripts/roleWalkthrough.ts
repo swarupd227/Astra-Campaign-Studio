@@ -162,7 +162,7 @@ async function main(): Promise<void> {
 
   act(CREATOR, "runs the Figma Mapping Agent — approved content lands on the board");
   await astra.orchestrator.runAgent(campaignId, figmaMappingAgent);
-  const board = await inReview("Figma board (populated)");
+  const board = await inReview("Figma board");
   if (board) {
     const frames = board.body.frames as Record<string, string>;
     const filled = Object.values(frames).filter(Boolean).length;

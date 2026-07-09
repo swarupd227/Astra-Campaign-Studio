@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Astra } from "../app";
 import { agentsForStage, getAgentByName } from "../agents/catalogue";
-import { figmaMappingAgent, figmaRoundTripAgent } from "../agents/figmaAgents";
+import { boardArtifact, figmaBoardAgent, figmaMappingAgent, figmaRoundTripAgent } from "../agents/figmaAgents";
 import { ArtifactKind, ArtifactStatus, STAGE_ORDER, Stage, type Actor } from "../domain/types";
 import type { FigmaFrame } from "../integrations/figma";
 import { ROLE_CATALOGUE, getRole, type AccessDecision } from "../security/roles";
@@ -81,13 +81,40 @@ async function runStage(campaignId: string): Promise<void> {
       .filter((a) => a.status !== ArtifactStatus.Rejected)
       .map((a) => a.author.displayName),
   );
+  // §11.3 precondition: the Figma board (Phase 1, placeholder frames) must exist
+  // BEFORE any content agent fires — the orchestrator enforces the sequence.
+  if (obj.campaign.currentStage === Stage.ContentCreation && !boardArtifact(obj)) {
+    await astra.orchestrator.runAgent(campaignId, figmaBoardAgent);
+  }
   for (const agent of agents) {
-    // The Figma board is assembled from APPROVED content, so it is not part of
-    // the bulk run — it is triggered on approval (see maybeAssembleBoard).
+    // The Figma board is populated from APPROVED content (Phase 2), so it is not
+    // part of the bulk run — it is triggered on approval (see maybeAssembleBoard).
     if (agent.name === figmaMappingAgent.name) continue;
     if (authored.has(agent.name)) continue; // idempotent: don't re-run an agent that already produced
     await astra.orchestrator.runAgent(campaignId, agent);
   }
+}
+
+/**
+ * Phase 1 of the mapping contract (§11.3): the moment the Campaign Scope Brief
+ * is approved, create the Figma board and its named placeholder frames — before
+ * creation begins. Idempotent; runs at most once per campaign.
+ */
+async function maybeCreateBoard(campaignId: string): Promise<void> {
+  const obj = await astra.repo.load(campaignId);
+  if (!obj || obj.campaign.currentStage !== Stage.ContentPlanning) return;
+  if (boardArtifact(obj)) return;
+  const scopeBriefApproved = Object.values(obj.artifacts).some(
+    (a) => a.kind === ArtifactKind.CreativeBrief && a.status === ArtifactStatus.Approved,
+  );
+  if (!scopeBriefApproved) return;
+  await astra.orchestrator.runAgent(campaignId, figmaBoardAgent);
+  await notifier.notify(
+    campaignId,
+    "created",
+    "Figma board created",
+    "The Campaign Scope Brief was approved — the board and its placeholder frames are ready for creation (§11.3 Phase 1).",
+  );
 }
 
 /**
@@ -110,14 +137,10 @@ async function maybeAssembleBoard(campaignId: string): Promise<void> {
     approved(ArtifactKind.ContentItem, "Landing page");
   if (!sourcesReady) return;
 
-  // Skip if a populated board already exists (and isn't rejected).
-  const boardExists = Object.values(obj.artifacts).some(
-    (a) =>
-      a.title === "Figma board (populated)" &&
-      a.status !== ArtifactStatus.Rejected &&
-      Number((a.body as { filledFrames?: number }).filledFrames ?? 0) > 0,
-  );
-  if (boardExists) return;
+  // Skip if a POPULATED board already exists; a Phase-1 placeholder board is
+  // exactly what Phase 2 fills (and supersedes — same title, §11.3).
+  const board = boardArtifact(obj);
+  if (board && Number((board.body as { filledFrames?: number }).filledFrames ?? 0) > 0) return;
 
   await astra.orchestrator.runAgent(campaignId, figmaMappingAgent);
 }
@@ -400,6 +423,21 @@ route("GET", "/assets/:file", async (_req, res, p) => {
   res.end(svg);
 });
 
+// Configure SFMC Data Extension read (subdomain + client credentials) or revert
+// to the bundled local dataset. In-memory only — never persisted.
+route("POST", "/api/settings/sfmc", async (req, res, _p, body) => {
+  const decision = astra.access.canAdmin(actorFor(req).role);
+  if (!decision.allowed) return forbid(res, decision);
+  const subdomain = typeof body.subdomain === "string" ? body.subdomain.trim() : "";
+  const clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
+  const clientSecret = typeof body.clientSecret === "string" ? body.clientSecret.trim() : "";
+  if ((subdomain || clientId || clientSecret) && !(subdomain && clientId && clientSecret)) {
+    return json(res, 400, { error: "SFMC live mode needs subdomain, client id and client secret together." });
+  }
+  astra.configureSfmc(subdomain ? { subdomain, clientId, clientSecret } : null);
+  json(res, 200, astra.sfmcStatus());
+});
+
 // Connect Claude Design via its MCP server, or disconnect (empty token).
 route("POST", "/api/settings/claude-design", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
@@ -422,6 +460,7 @@ route("GET", "/api/admin/integrations", async (req, res) => {
     connected: astra.connectors.describe(),
     figma: astra.figmaStatus(),
     claudeDesign: astra.claudeDesignStatus(),
+    sfmc: astra.sfmcStatus(),
     teams: astra.teamsStatus(),
     planned: [
       { name: "Salesforce Marketing Cloud", phase: "MVP-2" },
@@ -499,7 +538,8 @@ route("POST", "/api/campaigns/:id/approve", async (req, res, p, body) => {
   try {
     // Authority is enforced in the orchestrator via the role-carrying actor.
     await astra.orchestrator.approve(p.id!, String(body.artifactId), actorFor(req), body.note);
-    await maybeAssembleBoard(p.id!); // populate the Figma board once its sources are approved
+    await maybeCreateBoard(p.id!); // §11.3 Phase 1: board on Scope Brief approval
+    await maybeAssembleBoard(p.id!); // §11.3 Phase 2: populate once sources are approved
     await maybeHarvestLearning(p.id!, String(body.artifactId)); // §6.7 learning loop
     json(res, 200, await astra.canvas(p.id!, viewerRole(req)));
   } catch (err) {
@@ -808,7 +848,8 @@ route("POST", "/api/campaigns/:id/command", async (req, res, p, body) => {
       await maybeHarvestLearning(p.id!, artId);
       n += 1;
     }
-    await maybeAssembleBoard(p.id!);
+    await maybeCreateBoard(p.id!); // §11.3 Phase 1 (Scope Brief just approved?)
+    await maybeAssembleBoard(p.id!); // §11.3 Phase 2 (sources just approved?)
     reply = `Approved ${n} item(s) in your review queue.`;
   } else if (text.includes("advance")) {
     const d = astra.access.canAdvance(actor.role);

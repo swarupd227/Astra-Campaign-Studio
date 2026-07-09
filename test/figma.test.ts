@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Astra } from "../src/app";
 import { fixedClock } from "../src/domain/ids";
-import { ArtifactKind, Stage, type Actor } from "../src/domain/types";
+import { ArtifactKind, ArtifactStatus, Stage, type Actor } from "../src/domain/types";
 import { agentsForStage } from "../src/agents/catalogue";
-import { figmaRoundTripAgent } from "../src/agents/figmaAgents";
+import { boardArtifact, figmaRoundTripAgent } from "../src/agents/figmaAgents";
 import { FIGMA_FRAMES, FIGMA_SCOPES } from "../src/integrations/figma";
 import {
   ConnectorRegistry,
@@ -34,18 +34,46 @@ async function runToRollout(astra: Astra): Promise<string> {
   return id;
 }
 
-describe("Figma mapping agent (spec §10.3)", () => {
+describe("Figma mapping agent (spec §10.3, two-phase §11.3)", () => {
   it("populates every named placeholder frame from approved artifacts", async () => {
     const astra = newAstra();
     const id = await runToRollout(astra);
     const obj = await astra.repo.load(id);
-    const board = Object.values(obj!.artifacts).find((a) => a.title === "Figma board (populated)");
+    const board = boardArtifact(obj!);
     expect(board).toBeDefined();
+    expect(board!.body.phase).toBe("populated");
     const frames = board!.body.frames as Record<string, string>;
     for (const frame of FIGMA_FRAMES) {
       expect(frames[frame], `frame ${frame} should be filled`).toBeTruthy();
     }
     expect(board!.kind).toBe(ArtifactKind.Asset);
+  });
+
+  it("Phase 1 creates the board BEFORE any content agent fires (§11.3 precondition)", async () => {
+    const astra = newAstra();
+    const id = await runToRollout(astra);
+    const events = await astra.store.read(id);
+    const proposals = events.flatMap((e) => (e.body.type === "ArtifactProposed" ? [e.body] : []));
+    const boardIdx = proposals.findIndex(
+      (p) => p.artifact.title === "Figma board" && p.artifact.body.phase === "placeholders",
+    );
+    const firstContentIdx = proposals.findIndex(
+      (p) => p.artifact.kind === ArtifactKind.ContentItem && p.artifact.stage === Stage.ContentCreation,
+    );
+    expect(boardIdx).toBeGreaterThanOrEqual(0);
+    expect(firstContentIdx).toBeGreaterThan(boardIdx); // board existence precedes content generation
+  });
+
+  it("the populated board supersedes the placeholder board and derives from it", async () => {
+    const astra = newAstra();
+    const id = await runToRollout(astra);
+    const obj = await astra.repo.load(id);
+    const versions = Object.values(obj!.artifacts).filter((a) => a.title === "Figma board");
+    expect(versions.length).toBeGreaterThanOrEqual(2);
+    const placeholders = versions.find((a) => a.body.phase === "placeholders")!;
+    const populated = boardArtifact(obj!)!;
+    expect(placeholders.status).toBe(ArtifactStatus.Superseded);
+    expect(populated.derivedFrom).toContain(placeholders.id);
   });
 
   it("records every Figma call as a governed, audited connector event", async () => {
@@ -63,7 +91,7 @@ describe("Figma mapping agent (spec §10.3)", () => {
     const astra = newAstra();
     const id = await runToRollout(astra);
     const obj = await astra.repo.load(id);
-    const board = Object.values(obj!.artifacts).find((a) => a.title === "Figma board (populated)");
+    const board = boardArtifact(obj!);
     expect(board!.citations.length).toBeGreaterThan(0);
     expect(board!.derivedFrom.length).toBeGreaterThan(0);
   });

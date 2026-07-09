@@ -21,6 +21,7 @@ import { StageOrchestrator } from "./orchestration/stageOrchestrator";
 import { ConnectorRegistry } from "./integrations/mcp";
 import { FigmaConnector, FIGMA_SCOPES, type FigmaLiveConfig } from "./integrations/figma";
 import { CLAUDE_DESIGN_SCOPE, ClaudeDesignConnector, type ClaudeDesignConfig } from "./integrations/claudeDesign";
+import { SFMC_DATA_SCOPES, SfmcDataConnector, type SfmcLiveConfig } from "./integrations/sfmcData";
 import { TeamsConnector, type TeamsConfig } from "./integrations/teams";
 import {
   AdNetworkConnector,
@@ -81,6 +82,7 @@ export class Astra {
   readonly connectors: ConnectorRegistry;
   readonly figma: FigmaConnector;
   readonly claudeDesign: ClaudeDesignConnector;
+  readonly sfmcData: SfmcDataConnector;
   readonly teams: TeamsConnector;
   readonly access: AccessControl;
   /** Campaign-scoped access for guest roles (spec §5.1 agency partner, §13). */
@@ -127,6 +129,18 @@ export class Astra {
       this.figma.configure({ token: process.env.FIGMA_TOKEN, fileKey: process.env.FIGMA_FILE_KEY });
     }
     this.connectors.register(this.figma);
+    // SFMC Data Extensions — READ, MVP-1 (spec §6.1): audience data grounds the
+    // planning agents. Token-optional: live SFMC REST when credentials are set,
+    // the bundled local Data Extension otherwise.
+    this.sfmcData = new SfmcDataConnector();
+    if (process.env.SFMC_SUBDOMAIN && process.env.SFMC_CLIENT_ID && process.env.SFMC_CLIENT_SECRET) {
+      this.sfmcData.configure({
+        subdomain: process.env.SFMC_SUBDOMAIN,
+        clientId: process.env.SFMC_CLIENT_ID,
+        clientSecret: process.env.SFMC_CLIENT_SECRET,
+      });
+    }
+    this.connectors.register(this.sfmcData);
     // Claude Design (Anthropic Labs) via its MCP server — connected from Admin settings
     // (or CLAUDE_DESIGN_TOKEN at launch); unconfigured it simply reports not-connected.
     this.claudeDesign = new ClaudeDesignConnector();
@@ -162,7 +176,7 @@ export class Astra {
         connectors: this.connectors,
         // Agents read/assemble via connectors; irreversible publish/send scopes are
         // NOT granted here — go-live executes those with explicit human approval.
-        agentScopes: [FIGMA_SCOPES.read, FIGMA_SCOPES.write, ANALYTICS_SCOPES.read, CLAUDE_DESIGN_SCOPE],
+        agentScopes: [FIGMA_SCOPES.read, FIGMA_SCOPES.write, ANALYTICS_SCOPES.read, CLAUDE_DESIGN_SCOPE, SFMC_DATA_SCOPES.read],
         access: this.access,
         // §9.2 feedback loop: evals grade against the LIVE golden set, and human
         // rejections of gate-passing copy flow back as tuning suggestions.
@@ -354,6 +368,14 @@ export class Astra {
   }
   configureFigma(cfg: FigmaLiveConfig | null): void {
     this.figma.configure(cfg);
+  }
+
+  /** SFMC Data Extension (read) status + runtime configuration (Admin only). */
+  sfmcStatus() {
+    return this.sfmcData.status();
+  }
+  configureSfmc(cfg: SfmcLiveConfig | null): void {
+    this.sfmcData.configure(cfg);
   }
 
   /** Teams connection status + runtime configuration (Admin only). */

@@ -3,13 +3,75 @@ import type { Agent, AgentContext } from "../orchestration/agent";
 import { FIGMA_SCOPES, type FigmaBoard, type FigmaFrame, type MapContentInput } from "../integrations/figma";
 
 /**
- * Figma Mapping Agent (spec §6.3, §10.3). Reads APPROVED copy and creative from
- * the campaign object and deterministically places them into the board's named
- * placeholder frames via the governed Figma MCP tool — resolving the "Figma
- * Mapping Agent dependency" as an engineered contract, not inference.
+ * Figma Mapping Agent (spec §6.3, §10.3, §11.3) — TWO-PHASE, resolving the
+ * "dependency on the Figma Mapping Agent to create the board" flagged on
+ * Hilti's flow as a deterministic sequence rather than a race:
+ *
+ *  Phase 1 (figmaBoardAgent): on approval of the Campaign Scope Brief, create
+ *  the board and its named placeholder frames — BEFORE any content agent fires.
+ *  The board's existence is a precondition of content generation, enforced by
+ *  the orchestrator.
+ *
+ *  Phase 2 (figmaMappingAgent): place APPROVED copy and creative into the
+ *  matching frames. Same artifact title, so the populated board supersedes the
+ *  placeholder board — one "Figma board" with full version history.
  */
 
 const AGENT_ACTOR = { kind: "agent" as const, id: "Figma Mapping Agent", displayName: "Figma Mapping Agent" };
+
+export const BOARD_TITLE = "Figma board";
+
+/** The current (non-superseded) board artifact, whatever its phase. */
+export function boardArtifact(obj: { artifacts: Record<string, Artifact> }): Artifact | undefined {
+  return Object.values(obj.artifacts)
+    .filter(
+      (a) =>
+        a.title === BOARD_TITLE &&
+        a.status !== ArtifactStatus.Rejected &&
+        a.status !== ArtifactStatus.Superseded,
+    )
+    .sort((a, b) => b.version - a.version)[0];
+}
+
+/**
+ * Phase 1 — board creation (§11.3). Runs when the Campaign Scope Brief is
+ * approved; creates the board with its named placeholder frames, all empty.
+ */
+export const figmaBoardAgent: Agent = {
+  name: "Figma Mapping Agent",
+  stage: Stage.ContentCreation,
+  role: "creator",
+  async propose(ctx) {
+    const boardId = ctx.campaignId;
+    const scopeBrief = approved(ctx, ArtifactKind.CreativeBrief);
+
+    let board: FigmaBoard | undefined;
+    if (ctx.connectors) {
+      board = (await ctx.connectors.invoke("figma", "get_template", { boardId }, {
+        campaignId: ctx.campaignId,
+        actor: AGENT_ACTOR,
+        grantedScopes: ctx.grantedScopes ?? [FIGMA_SCOPES.read],
+      })) as FigmaBoard;
+    }
+
+    return {
+      kind: ArtifactKind.Asset,
+      stage: Stage.ContentCreation,
+      title: BOARD_TITLE,
+      body: {
+        boardId,
+        phase: "placeholders",
+        frames: board?.frames ?? {},
+        filledFrames: 0,
+        boardVersion: board?.version ?? 1,
+      },
+      rationale:
+        "Phase 1 of the mapping contract (§11.3): created the board and its named placeholder frames from the approved Campaign Scope Brief — before any content agent fires.",
+      citations: scopeBrief?.citations ?? [],
+      derivedFrom: scopeBrief ? [scopeBrief.id] : [],
+    };
+  },
+};
 
 function approved(ctx: AgentContext, kind: ArtifactKind, titleIncludes?: string): Artifact | undefined {
   return Object.values(ctx.campaign.artifacts).find(
@@ -56,6 +118,8 @@ export const figmaMappingAgent: Agent = {
   async propose(ctx) {
     const boardId = ctx.campaignId;
     const { mappings, sources } = buildMappings(ctx);
+    // Phase 2 derives from the Phase-1 placeholder board (§11.3 lineage).
+    const placeholders = boardArtifact(ctx.campaign);
 
     let board: FigmaBoard | undefined;
     if (ctx.connectors) {
@@ -82,16 +146,17 @@ export const figmaMappingAgent: Agent = {
     return {
       kind: ArtifactKind.Asset,
       stage: Stage.ContentCreation,
-      title: "Figma board (populated)",
+      title: BOARD_TITLE, // same title → the populated board supersedes the placeholders
       body: {
         boardId,
+        phase: "populated",
         frames: board?.frames ?? mappings,
         filledFrames: filled,
         boardVersion: board?.version ?? 1,
       },
-      rationale: `Deterministically placed approved content into ${Object.keys(mappings).length} named frames via the governed Figma MCP tool.`,
+      rationale: `Phase 2 of the mapping contract (§11.3): deterministically placed approved content into ${Object.keys(mappings).length} named frames via the governed Figma MCP tool.`,
       citations,
-      derivedFrom: sources.map((s) => s.id),
+      derivedFrom: [...(placeholders ? [placeholders.id] : []), ...sources.map((s) => s.id)],
     };
   },
 };
@@ -107,7 +172,7 @@ export const figmaRoundTripAgent: Agent = {
   role: "creator",
   async propose(ctx) {
     const boardId = ctx.campaignId;
-    const prevBoard = approved(ctx, ArtifactKind.Asset, "Figma board (populated)");
+    const prevBoard = approved(ctx, ArtifactKind.Asset, BOARD_TITLE);
 
     let board: FigmaBoard | undefined;
     if (ctx.connectors) {
@@ -127,9 +192,10 @@ export const figmaRoundTripAgent: Agent = {
     return {
       kind: ArtifactKind.Asset,
       stage: Stage.ContentCreation,
-      title: "Figma board (populated)", // same title → new version supersedes prior
+      title: BOARD_TITLE, // same title → new version supersedes prior
       body: {
         boardId,
+        phase: "populated",
         frames: board?.frames ?? {},
         filledFrames: filled,
         boardVersion: board?.version ?? 1,

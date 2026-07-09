@@ -1,7 +1,8 @@
-import type { Actor } from "../domain/types";
+import { Stage, type Actor } from "../domain/types";
 import type { Orchestrator, RunResult } from "./orchestrator";
 import type { CampaignRepository } from "../store/campaignRepository";
 import { agentsForStage } from "../agents/catalogue";
+import { boardArtifact, figmaBoardAgent } from "../agents/figmaAgents";
 import { gateStatus } from "./stateMachine";
 
 export interface StageAgentReport {
@@ -40,7 +41,12 @@ export class StageOrchestrator {
     const obj = await this.repo.load(campaignId);
     if (!obj) throw new Error(`Campaign ${campaignId} not found`);
     const stage = obj.campaign.currentStage;
-    const agents = agentsForStage(stage);
+    // §11.3 precondition: the board (Phase 1, placeholder frames) exists before
+    // any content agent fires — a deterministic sequence, not a race.
+    const agents =
+      stage === Stage.ContentCreation && !boardArtifact(obj)
+        ? [figmaBoardAgent, ...agentsForStage(stage)]
+        : agentsForStage(stage);
 
     const agentReports: StageAgentReport[] = [];
     for (const agent of agents) {

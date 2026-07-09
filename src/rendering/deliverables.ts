@@ -143,7 +143,13 @@ const CATALOGUE: DeliverableDef[] = [
       const competitive = sources.find((s) => s.kind === ArtifactKind.CompetitiveInsight);
       const audience = sources.find((s) => s.kind === ArtifactKind.Audience);
       const pillars = (messaging?.body.pillars ?? []) as { message: string; proof: string }[];
-      const segments = (audience?.body.segments ?? []) as { name: string; size: string; priority: number }[];
+      const segments = (audience?.body.segments ?? []) as {
+        name: string;
+        size?: string;
+        contacts?: number;
+        consentedReach?: number;
+        priority: number;
+      }[];
       const spec: DeckSpec = {
         title: "Marcom strategy",
         subtitle: obj.campaign.objective,
@@ -168,9 +174,17 @@ const CATALOGUE: DeliverableDef[] = [
             blocks: [
               {
                 kind: "table",
-                header: ["Segment", "Size", "Priority"],
-                rows: segments.map((s) => [s.name, s.size, String(s.priority)]),
+                header: ["Segment", "Contacts", "Consented reach", "Priority"],
+                rows: segments.map((s) => [
+                  s.name,
+                  s.contacts != null ? s.contacts.toLocaleString("en-US") : (s.size ?? "—"),
+                  s.consentedReach != null ? s.consentedReach.toLocaleString("en-US") : "—",
+                  String(s.priority),
+                ]),
               },
+              ...(audience?.body.sizedFrom
+                ? [{ kind: "bullets" as const, items: [`Sizing source: ${String(audience.body.sizedFrom)}`] }]
+                : []),
             ],
           },
           {

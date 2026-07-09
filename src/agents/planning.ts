@@ -1,5 +1,5 @@
 import { ArtifactKind, Stage } from "../domain/types";
-import { defineAgent, findArtifactId, type Agent } from "../orchestration/agent";
+import { defineAgent, findArtifactId, groundedGenerate, type Agent } from "../orchestration/agent";
 
 /** Stage 1 · Campaign Planning agents (spec §6.1). All derive from the approved Brief. */
 
@@ -24,23 +24,73 @@ export const strategyAgent: Agent = defineAgent({
   }),
 });
 
-export const audienceAgent: Agent = defineAgent({
+/**
+ * Audience / Segmentation Agent — grounds segment sizing on the SFMC Data
+ * Extension (read, MVP-1, spec §6.1): sizes come from Hilti's marketing-cloud
+ * audience data via the governed connector, not a model's guess. Falls back to
+ * qualitative sizing if the connector is unavailable.
+ */
+export const audienceAgent: Agent = {
   name: "Audience / Segmentation Agent",
   stage: Stage.CampaignPlanning,
   role,
-  kind: ArtifactKind.Audience,
-  title: "Target audiences",
-  system: "You are Hilti's Audience Agent. Define target segments, personas and sizing.",
-  query: () => "professional trades segments personas market",
-  rationale: "Defined and sized primary segments from product fit and market context.",
-  derivedFrom: briefLineage,
-  body: () => ({
-    segments: [
+  async propose(ctx) {
+    const { citations } = await groundedGenerate(ctx, {
+      system: "You are Hilti's Audience Agent. Define target segments, personas and sizing.",
+      query: "professional trades segments personas market",
+      buildPrompt: (context) => `Grounding:\n${context}\n\nTask: produce "Target audiences".`,
+    });
+
+    let segments: Record<string, unknown>[] = [
       { name: "General contractors", size: "large", priority: 1 },
       { name: "Electrical & MEP", size: "medium", priority: 2 },
-    ],
-  }),
-});
+    ];
+    let sizedFrom = "market heuristics";
+    if (ctx.connectors?.get("sfmc-data")) {
+      try {
+        const de = (await ctx.connectors.invoke(
+          "sfmc-data",
+          "read_data_extension",
+          { key: "Audience_Segments" },
+          {
+            campaignId: ctx.campaignId,
+            actor: { kind: "agent", id: "agent_audience", displayName: "Audience / Segmentation Agent" },
+            grantedScopes: ctx.grantedScopes ?? [],
+          },
+        )) as { rows: { segment: string; market: string; contacts: number; consentedShare: number }[]; source: string };
+        // Aggregate contacts per segment across the campaign's markets.
+        const bySegment = new Map<string, { contacts: number; consented: number }>();
+        for (const row of de.rows) {
+          const agg = bySegment.get(row.segment) ?? { contacts: 0, consented: 0 };
+          agg.contacts += row.contacts;
+          agg.consented += Math.round(row.contacts * row.consentedShare);
+          bySegment.set(row.segment, agg);
+        }
+        segments = [...bySegment.entries()]
+          .sort((a, b) => b[1].contacts - a[1].contacts)
+          .map(([name, agg], i) => ({
+            name,
+            contacts: agg.contacts,
+            consentedReach: agg.consented,
+            priority: i + 1,
+          }));
+        sizedFrom = de.source === "sfmc-live" ? "SFMC Data Extension (live)" : "SFMC Data Extension (local dataset)";
+      } catch {
+        // Governance denial / connector failure → keep the qualitative fallback.
+      }
+    }
+
+    return {
+      kind: ArtifactKind.Audience,
+      stage: Stage.CampaignPlanning,
+      title: "Target audiences",
+      body: { segments, sizedFrom },
+      rationale: `Defined target segments with sizing grounded in ${sizedFrom} — consented reach drives channel weighting downstream.`,
+      citations,
+      derivedFrom: findArtifactId(ctx, ArtifactKind.Brief),
+    };
+  },
+};
 
 export const valuePropAgent: Agent = defineAgent({
   name: "Value Proposition Agent",

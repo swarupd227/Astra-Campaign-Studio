@@ -790,21 +790,25 @@ function artifactCard(a) {
 }
 
 function renderFigma(view) {
-  const board = view.artifacts.filter(a => a.title === 'Figma board (populated)').pop();
+  const board = view.artifacts.filter(a => a.title === 'Figma board' && a.status !== 'superseded' && a.status !== 'rejected').pop();
   const card = $('figmaCard');
   if (!board) { card.style.display = 'none'; return; }
   card.style.display = '';
+  const isPlaceholders = !Number(board.body.filledFrames || 0);
+  const phaseNote = isPlaceholders
+    ? `<div class="cite" style="margin:0 0 6px">Board created from the approved Campaign Scope Brief — named placeholder frames ready. Approved content drops in as it clears review.</div>`
+    : '';
   const frames = board.body.frames || {};
   const rows = Object.entries(frames).map(([f,v]) =>
     `<div class="frame"><div class="fname">${esc(label(FRAME_LABEL, f))}</div><div class="fval ${v?'':'empty'}">${v ? (isImageUrl(v) ? imagePreview(v, true) : esc(v)) : 'Empty placeholder'}</div></div>`).join('');
   const opts = Object.keys(frames).map(f => `<option value="${f}">${esc(label(FRAME_LABEL, f))}</option>`).join('');
-  $('figma').innerHTML = `${rows}
+  $('figma').innerHTML = `${phaseNote}${rows}` + (isPlaceholders ? '' : `
     <div class="cite" style="margin:10px 0 6px">Simulate a designer editing a frame, then sync it back:</div>
     <div style="display:flex;gap:6px">
       <select id="frameSel" class="ghost" style="padding:6px" aria-label="Frame to edit">${opts}</select>
       <input id="frameVal" placeholder="New content for the frame" aria-label="New frame content" style="flex:1;border:1px solid var(--line);border-radius:7px;padding:6px"/>
       <button class="ghost" onclick="figmaEdit()">Sync</button>
-    </div>`;
+    </div>`);
 }
 
 function render(view) {
@@ -1020,6 +1024,22 @@ async function renderSettings(isAdmin) {
     ${cd.configured ? '' : '<div style="margin:2px 0 6px"><button class="approve" onclick="connectClaudeDesignDemo()">Use bundled demo server — no credentials needed</button></div>'}
     <div class="cite">Discovers the server’s design tools at connect time; every call is scope-checked, rate-limited and audited like any other connector. The bundled demo server speaks the same MCP protocol locally — no Anthropic credentials needed; once connected, the Image Generation Agent creates the campaign hero through it.</div>`;
 
+  // SFMC Data Extensions (read, MVP-1) — audience data grounds the planning agents.
+  const sf = integ?.sfmc || { mode: 'mock', subdomain: null, clientIdHint: null };
+  const sfmcPanel = `
+    <div class="cite" style="margin:10px 0 2px"><b>SFMC Data Extensions</b> · read ·
+      ${sf.mode === 'live'
+        ? `<b style="color:var(--green)">live</b> · ${esc(sf.subdomain)} · client ${esc(sf.clientIdHint)}`
+        : `<b style="color:var(--amber)">local dataset</b> — connect for live audience data`}</div>
+    <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap">
+      <input id="sfSub" placeholder="Tenant subdomain" style="flex:1 1 110px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px"/>
+      <input id="sfCid" placeholder="Client id" style="flex:0 1 100px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px" autocomplete="off"/>
+      <input id="sfSec" type="password" placeholder="Client secret" style="flex:0 1 100px;min-width:0;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:12px" autocomplete="off"/>
+      <button class="ghost" onclick="saveSfmc()">Connect</button>
+      ${sf.mode === 'live' ? '<button class="ghost" onclick="clearSfmc()">Use local dataset</button>' : ''}
+    </div>
+    <div class="cite">The Audience Agent sizes segments from this Data Extension — consented reach, per market. Read-only in MVP-1; journeys &amp; sends are the MVP-2 write path.</div>`;
+
   // Teams — notifications always land in the in-app feed; a Workflows webhook adds channel delivery.
   const tm = integ?.teams || { mode: 'in-app', webhookHint: null };
   const teamsPanel = `
@@ -1054,7 +1074,7 @@ async function renderSettings(isAdmin) {
 
   document.getElementById('settings').innerHTML = `
     <div class="asection"><div class="ahdr">Model gateway</div>${gateway}</div>
-    <div class="asection"><div class="ahdr">Integrations</div>${figmaPanel}${cdPanel}${teamsPanel}
+    <div class="asection"><div class="ahdr">Integrations</div>${figmaPanel}${cdPanel}${sfmcPanel}${teamsPanel}
       <div class="chips" style="margin-top:8px">${plannedRows}</div></div>
     <div class="asection"><div class="ahdr">Knowledge fabric</div>${knowledgeSection}</div>
     <div class="asection"><div class="ahdr">Autonomy dial (per stage)</div>${policyRows}
@@ -1153,6 +1173,21 @@ async function connectClaudeDesign() {
 async function disconnectClaudeDesign() {
   await api('POST', '/api/settings/claude-design', { token: '' });
   toast('Claude Design disconnected.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function saveSfmc() {
+  const subdomain = $('sfSub').value.trim(), clientId = $('sfCid').value.trim(), clientSecret = $('sfSec').value.trim();
+  if (!subdomain || !clientId || !clientSecret) { toast('SFMC live mode needs subdomain, client id and secret.'); return; }
+  const r = await api('POST', '/api/settings/sfmc', { subdomain, clientId, clientSecret });
+  if (r && (r.forbidden || r.error)) { toast(r.error || 'Not permitted.'); return; }
+  toast('SFMC connected — planning agents now ground on live Data Extensions.', true);
+  if (document.activeElement) document.activeElement.blur();
+  renderSettings(true);
+}
+async function clearSfmc() {
+  await api('POST', '/api/settings/sfmc', {});
+  toast('SFMC reverted to the bundled local dataset.', true);
   if (document.activeElement) document.activeElement.blur();
   renderSettings(true);
 }

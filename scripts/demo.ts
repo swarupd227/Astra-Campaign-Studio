@@ -70,7 +70,9 @@ async function main(): Promise<void> {
   banner("FIGMA MOMENT (spec §10.3)");
   const boardBefore = astra.figma;
   const afterCreation = await astra.repo.load(campaignId);
-  const board = Object.values(afterCreation!.artifacts).find((a) => a.title === "Figma board (populated)");
+  const board = Object.values(afterCreation!.artifacts).find(
+    (a) => a.title === "Figma board" && a.body.phase === "populated",
+  );
   if (board) {
     const frames = board.body.frames as Record<string, string>;
     console.log(`  Board populated deterministically from approved artifacts:`);
