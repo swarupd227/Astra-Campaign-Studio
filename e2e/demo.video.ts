@@ -65,17 +65,17 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#rail .stage").first()).toBeVisible();
   await setRole("marketing-ops");
-  await caption("This is Astra Campaign Studio by ARTIZENT. AI agents do the heavy lifting. People stay in charge.", 6000);
-  await caption("Everything about a campaign lives on one screen: the stages, the work, and who needs to approve what.", 5500);
+  await caption("This is Astra Campaign Studio by ARTIZENT. AI agents do the heavy lifting. People stay in charge.", 5000);
+  await caption("Everything about a campaign lives on one screen: the stages, the work, and who needs to approve what.", 5000);
 
   // ── Scene 1b · connect Claude Design over MCP ──────────────────────────────
   const demoBtn = page.locator("#settings button", { hasText: "Use bundled demo server" });
   await demoBtn.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await noDrift();
-  await caption("One quick stop first: connecting Claude Design. It plugs in over MCP with a single click.", 5000);
+  await caption("One quick stop first: connecting Claude Design. It plugs in over MCP with a single click.", 4500);
   await demoBtn.evaluate((el) => (el as HTMLButtonElement).click());
   await expect(page.locator("#toast")).toContainText("design tools discovered");
-  await caption("Connected. From here on, the agents create real artwork through Claude Design.", 5000);
+  await caption("Connected. From here on, the agents create real artwork through Claude Design.", 4500);
   await page.evaluate(() => window.scrollTo({ top: 0 }));
   await noDrift();
 
@@ -103,14 +103,23 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
 
   // ── Scene 4 · planning ─────────────────────────────────────────────────────
   await command("run stage");
-  await caption("Eight agents build the plan: strategy, audiences, budget. And they lock the targets.", 5500);
+  await caption("Eight agents build the plan: strategy, audiences, budget. And they lock the targets.", 5000);
   await command("approve all");
+
+  // ── Scene 4b · the documents (§9) ──────────────────────────────────────────
+  await scrollTo("#deliverablesCard");
+  await caption("The strategy deck and the plan workbook? Generated right here, on the brand template, always in sync.", 6000);
+  await caption("You can even edit the workbook in Excel, upload it back, and it reconciles your changes.", 5000);
   await command("advance");
 
   // ── Scene 5 · content planning (brisk) ─────────────────────────────────────
   await command("run stage");
   await caption("Then the creative plan: concept, storyboard, calendar and channel briefs.", 4500);
   await command("approve all");
+
+  // ── Scene 5b · the board appears (§11.3 Phase 1) ───────────────────────────
+  await scrollTo("#figmaCard");
+  await caption("And the moment the brief is signed off, the Figma board appears. Empty frames, waiting for content.", 5500);
   await command("advance");
 
   // ── Scene 6 · creation + quality gates ─────────────────────────────────────
@@ -118,12 +127,25 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
   await caption("Now the actual content. Copy, email, landing page, imagery. Even a German version.", 5000);
   const copyCard = page.locator("#artifacts .art", { hasText: "Paid-social copy" }).first();
   await scrollToLoc(copyCard);
-  await caption("Every asset is checked before a person even sees it: sources, brand, legal, accessibility, translation.", 5500);
+  await caption("Every asset is checked before a person even sees it: sources, brand, legal, accessibility, translation.", 5000);
 
   // ── Scene 6b · the hero, made by Claude Design ─────────────────────────────
   const heroCard = page.locator("#artifacts .art", { hasText: "Hero image" }).first();
   await scrollToLoc(heroCard);
-  await caption("And the hero image? That's real artwork — Claude Design made it just now, on brief.", 6000);
+  await caption("And the hero image? That's real artwork — Claude Design made it just now, on brief.", 5500);
+
+  // ── Scene 6c · the Asset Studio (§8.2) ─────────────────────────────────────
+  await page.click("#navStudio");
+  await page.waitForTimeout(1200);
+  await noDrift();
+  await caption("Creators get their own studio: all the work, by channel, artwork included, ready to refine.", 5500);
+  await page.click("#navCampaign");
+  await page.waitForTimeout(1200);
+  await noDrift();
+
+  // ── Scene 6d · just ask (§8.3) ─────────────────────────────────────────────
+  await command("Add a LinkedIn variant for the DACH market");
+  await caption("Need something that isn't there? Just ask. The right agent picks it up.", 5000);
 
   // ── Scene 7 · @mention a colleague ─────────────────────────────────────────
   await copyCard.locator(".linkbtn", { hasText: "Mention" }).click();
@@ -134,17 +156,17 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
 
   // ── Scene 8 · role lens + request changes ──────────────────────────────────
   await setRole("legal");
-  await caption("Every role gets its own view. This is Legal's: only the things Legal signs off.", 5500);
+  await caption("Every role gets its own view. This is Legal's: only the things Legal signs off.", 5000);
   const legalCopy = page.locator("#artifacts .art", { hasText: "Paid-social copy" }).first();
   await scrollToLoc(legalCopy);
   nextDialogText = "Cite the runtime footnote explicitly next to the claim.";
   await legalCopy.locator("button.reject").click();
   await page.waitForTimeout(2200);
-  await caption("Don't like something? Say why and send it back. The agent rewrites it and it's back in the queue.", 6000);
+  await caption("Don't like something? Say why and send it back. The agent rewrites it and it's back in the queue.", 5500);
 
   // ── Scene 9 · inline edit + diff ───────────────────────────────────────────
   await setRole("marketing-ops");
-  const redraft = page.locator("#artifacts .art", { hasText: "Paid-social copy" }).filter({ hasText: "Needs review" }).first();
+  const redraft = page.locator("#artifacts .art", { hasText: "Paid-social copy" }).filter({ hasText: "Revised to address" }).first();
   await scrollToLoc(redraft);
   await redraft.locator(".linkbtn", { hasText: "Edit" }).click();
   await caption("Or just edit it yourself. Every change becomes a new version.", 4000);
@@ -161,10 +183,10 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
   await page.waitForTimeout(1200);
   await scrollTo("#figmaCard");
   await expect(page.locator("#figmaCard img.assetpreview").first()).toBeVisible();
-  await caption("Everything approved lands on the Figma board — the artwork right there with the copy.", 6000);
+  await caption("And those empty frames? Now filled — approved copy and artwork, in their places.", 5000);
   await page.click("#navLocalisation");
   await page.waitForTimeout(1200);
-  await caption("Translations sit side by side with the original, checked for meaning, not just words.", 6000);
+  await caption("Translations sit side by side with the original, checked for meaning, not just words.", 5500);
   await page.click("#navCampaign");
   await command("advance");
 
@@ -184,7 +206,7 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
   await command("run stage");
   await page.click("#navPerformance");
   await page.waitForTimeout(1300);
-  await caption("Once live, the agents watch the numbers. Small budget moves happen on their own. Big ones wait for you.", 6000);
+  await caption("Once live, the agents watch the numbers. Small budget moves happen on their own. Big ones wait for you.", 5500);
   await scrollTo("#perfTrend");
   await caption("You can see the ads getting tired. And the A/B test already found a better headline.", 5500);
   nextDialogText = "CPL worsened after the shift — reverting.";
@@ -197,14 +219,14 @@ test("ARTIZENT Astra Campaign Studio — recorded demo", async ({ page }) => {
 
   // ── Scene 13 · refresh + learning loop ─────────────────────────────────────
   await command("run stage");
-  await caption("Tired content gets refreshed, then checked all over again. No shortcuts.", 5000);
+  await caption("Tired content gets refreshed, then checked all over again. No shortcuts.", 4500);
   await command("approve all");
   await scrollTo("#notifs");
-  await caption("And what worked gets remembered. The next campaign starts smarter.", 5500);
+  await caption("And what worked gets remembered. The next campaign starts smarter.", 5000);
 
   // ── Scene 14 · close ───────────────────────────────────────────────────────
   await page.click("#navPortfolio");
   await page.waitForTimeout(1300);
-  await caption("Leadership sees it all in one view: pipeline, speed, quality and spend.", 5500);
-  await caption("Astra Campaign Studio by ARTIZENT. From idea to live campaign, end to end.", 7000);
+  await caption("Leadership sees it all in one view: pipeline, speed, quality and spend — and their own review inbox.", 5500);
+  await caption("Astra Campaign Studio by ARTIZENT. From idea to live campaign, end to end.", 6500);
 });

@@ -233,7 +233,14 @@ governance and UX carry through to MVP-2."*
 | 4b | Marketing Ops | Roll-out: deployments → consent gate blocks → **Go live** |
 | 4c | Performance Marketer | **Performance surface**: fatigue trend, auto vs. approval-required budget moves |
 | 4d | Perf. Marketer → Brand | Refresh re-gated → **learnings written back** to the fabric |
-| 5 | Marketing Leader | Portfolio: KPIs, pipeline, cycle time, drill-in |
-| 6 | Marketing Ops | Admin: gateway key, knowledge fabric, autonomy dial, agents, integrations |
+| 4e | Creator | **Asset Studio**: all content by channel, artwork visible, edit in place |
+| 5 | Marketing Leader | Portfolio: **review inbox** (approve across campaigns), KPIs, pipeline, drill-in |
+| 6 | Marketing Ops | Admin: gateway key, knowledge fabric, autonomy dial, agents, integrations (Figma, Claude Design, SFMC data, Teams) |
 
-Command rail shortcuts: `run stage` · `approve all` · `advance`.
+Command rail: `run stage` · `approve all` · `advance` · `status` — or plain language,
+e.g. **"Add a LinkedIn variant for the DACH market"** (the right agent picks it up).
+
+Worth pointing out as you go: every card carries an **AI / Human provenance badge**
+(EU AI Act transparency) and in-review items show their **review SLA** ("Due …" /
+"Review overdue"). Intake also accepts email (`POST /api/inbound/email`) — same
+interview, asks only what's missing.

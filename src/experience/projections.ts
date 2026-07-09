@@ -32,6 +32,12 @@ export interface ArtifactView {
   version: number;
   status: ArtifactStatus;
   author: string;
+  /** Provenance for EU AI Act transparency (§14): agent output vs human authorship. */
+  authorKind: "human" | "agent" | "system";
+  createdAt: string;
+  /** Review SLA (§10.1): when an in-review item is due, and whether it's overdue. */
+  reviewDueBy: string | null;
+  reviewOverdue: boolean;
   body: Record<string, unknown>;
   citations: { sourceId: string; title: string; version: string }[];
   rationale: string;
@@ -382,6 +388,26 @@ function explainability(events: CampaignEvent[]): {
   return { rationale, evals };
 }
 
+/**
+ * Review SLAs per stage (spec §10.1 "approval workflows with clear owners and
+ * SLAs") — hours an item may sit in review before it counts as overdue.
+ */
+const REVIEW_SLA_HOURS: Record<Stage, number> = {
+  [Stage.Intake]: 24,
+  [Stage.CampaignPlanning]: 48,
+  [Stage.ContentPlanning]: 48,
+  [Stage.ContentCreation]: 24,
+  [Stage.Rollout]: 12,
+  [Stage.CampaignOptimisation]: 24,
+  [Stage.ContentOptimisation]: 48,
+};
+
+function reviewSla(a: Artifact): { dueBy: string | null; overdue: boolean } {
+  if (a.status !== ArtifactStatus.InReview) return { dueBy: null, overdue: false };
+  const due = Date.parse(a.createdAt) + REVIEW_SLA_HOURS[a.stage] * 3_600_000;
+  return { dueBy: new Date(due).toISOString(), overdue: Date.now() > due };
+}
+
 function toArtifactView(
   a: Artifact,
   rationale: string,
@@ -389,6 +415,7 @@ function toArtifactView(
   canApprove: boolean,
   mentions: ArtifactView["mentions"] = [],
 ): ArtifactView {
+  const sla = reviewSla(a);
   return {
     mentions,
     id: a.id,
@@ -398,6 +425,10 @@ function toArtifactView(
     version: a.version,
     status: a.status,
     author: a.author.displayName,
+    authorKind: a.author.kind,
+    createdAt: a.createdAt,
+    reviewDueBy: sla.dueBy,
+    reviewOverdue: sla.overdue,
     body: a.body,
     citations: a.citations.map((c) => ({ sourceId: c.sourceId, title: c.title, version: c.version })),
     rationale,

@@ -209,6 +209,9 @@ route("GET", "/api/review-inbox", async (req, res) => {
     kind: string;
     version: number;
     author: string;
+    authorKind: string;
+    reviewDueBy: string | null;
+    reviewOverdue: boolean;
   }[] = [];
   for (const id of ids) {
     const view = await astra.canvas(id, role);
@@ -226,6 +229,9 @@ route("GET", "/api/review-inbox", async (req, res) => {
         kind: a.kind,
         version: a.version,
         author: a.author, // projected as a display name
+        authorKind: a.authorKind,
+        reviewDueBy: a.reviewDueBy,
+        reviewOverdue: a.reviewOverdue,
       });
     }
   }
@@ -280,6 +286,44 @@ route("POST", "/api/intake/:sid/reply", async (req, res, p, body) => {
   try {
     const reply = await interview.reply(p.sid!, String(body.text ?? ""), (input) => createCampaignFrom(input, actor));
     json(res, 200, reply);
+  } catch (err) {
+    json(res, 400, { error: (err as Error).message });
+  }
+});
+
+// Email entry point (spec §6.0 — "capture requests from any entry point"). The
+// same intake interview runs on the email content; replies thread via sessionId
+// (an email thread). A complete brief is taken as confirmed — email isn't a live
+// conversation — and the Campaign Manager still approves the brief in-app (RACI).
+route("POST", "/api/inbound/email", async (_req, res, _p, body) => {
+  const from = String(body.from ?? "").trim();
+  const subject = String(body.subject ?? "").trim();
+  const text = String(body.body ?? "").trim();
+  if (!from || !(subject || text)) return json(res, 400, { error: "Provide from and a subject or body." });
+  const actor: Actor = {
+    kind: "human",
+    id: `u_email_${from.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+    displayName: `${from} (email)`,
+    role: "campaign-manager", // requester intake; approvals still happen in-app per RACI
+  };
+  const create = (input: CreateCampaignInput) => createCampaignFrom(input, actor);
+  try {
+    const sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : interview.start().sessionId;
+    let reply = await interview.reply(sessionId, [subject, text].filter(Boolean).join(". "), create);
+    if (reply.awaitingConfirm && !reply.done) reply = await interview.reply(sessionId, "yes", create);
+    if (reply.done) {
+      return json(res, 201, {
+        created: true,
+        campaignId: reply.campaignId,
+        reply: `Thanks ${from} — the campaign is created and the Intake Agent has drafted the brief for review.`,
+      });
+    }
+    json(res, 200, {
+      created: false,
+      sessionId: reply.sessionId,
+      missing: reply.missing,
+      reply: `Thanks ${from} — one thing before we can brief the team: ${reply.message}`,
+    });
   } catch (err) {
     json(res, 400, { error: (err as Error).message });
   }

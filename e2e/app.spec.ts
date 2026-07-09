@@ -359,9 +359,38 @@ test.describe.serial("Astra Campaign Studio", () => {
     await page.click("#navPortfolio");
     await expect(page.locator("#pInbox")).toContainText("Campaign brief");
     await expect(page.locator("#pInbox")).toContainText("await your sign-off");
-    // "Open" jumps straight to the campaign canvas.
+    // Provenance labelling (§14, EU AI Act): agent outputs are marked as AI.
+    await expect(page.locator("#pInbox .prov.ai").first()).toBeVisible();
+    // "Open" jumps straight to the campaign canvas, where the review SLA shows.
     await page.locator("#pInbox button", { hasText: "Open" }).first().click();
     await expect(page.locator("#artifacts")).toBeVisible();
+    await expect(page.locator("#artifacts .prov.ai").first()).toBeVisible();
+    await expect(page.locator("#artifacts .sla").first()).toContainText("Due");
+  });
+
+  test("email intake: the interview runs on the mail thread (§6.0)", async ({ request }) => {
+    const first = await request.post("/api/inbound/email", {
+      data: {
+        from: "Maren Fischer",
+        subject: "Campaign request: DD 350 coring",
+        body: "We need to launch the DD 350 diamond coring system in the US with a €400k budget. Success metric is demo requests.",
+      },
+    });
+    expect(first.status()).toBe(200);
+    const r1 = await first.json();
+    // One rich email filled objective, market, budget and metric — only the
+    // mandatory-claims question comes back (asks only what's missing, §6.0).
+    expect(r1.created).toBe(false);
+    expect(r1.missing).toEqual(["mandatoryClaims"]);
+    expect(r1.reply).toContain("Maren");
+
+    const second = await request.post("/api/inbound/email", {
+      data: { from: "Maren Fischer", sessionId: r1.sessionId, body: "None." },
+    });
+    expect(second.status()).toBe(201);
+    const r2 = await second.json();
+    expect(r2.created).toBe(true);
+    expect(r2.campaignId).toBeTruthy();
   });
 
   test("the command rail understands natural-language instructions (§8.3)", async ({ page }) => {
