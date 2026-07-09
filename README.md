@@ -35,7 +35,7 @@ npm run walkthrough  # one campaign through ALL SEVEN ROLES in the terminal (no 
 npm run demo         # runtime slice: brief → planning → content planning → creation → Figma board
 npm test             # 152 unit/integration tests (full chain, gates, HITL, go-live, rollback, eval tuning, RBAC, guests, mentions, grounding, connectors, Claude Design MCP, SFMC data, deliverables & Office round-trip, intake, safety, telemetry, Postgres)
 npm run e2e          # 27 Playwright browser scenarios, incl. the full chain: brief → go-live → rollback & readout → learnings
-npm run demo:video   # records the captioned ~4-min product demo and renders demo/astra-demo.mp4 (needs ffmpeg)
+npm run demo:video   # records the captioned ~4-min product demo and renders the MP4 in demo/ (needs ffmpeg)
 npm run typecheck
 ```
 

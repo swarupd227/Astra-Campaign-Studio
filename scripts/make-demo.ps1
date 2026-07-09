@@ -7,7 +7,7 @@ $webm = Get-ChildItem -Path "test-results-demo" -Recurse -Filter "*.webm" |
 if (-not $webm) { Write-Error "No recorded .webm found under test-results-demo - run the demo config first."; exit 1 }
 
 New-Item -ItemType Directory -Force -Path "demo" | Out-Null
-$out = "demo/astra-demo.mp4"
+$out = "demo/astra-campaign- studio- demo.mp4"
 
 ffmpeg -y -i $webm.FullName -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -movflags +faststart -an $out
 
