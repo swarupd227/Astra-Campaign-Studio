@@ -118,6 +118,14 @@
   .assetpreview { display: block; max-width: 240px; width: 100%; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 4px rgba(10,22,40,.12); }
   .assetpreview.big { max-width: 420px; }
 
+  /* deliverables (§9): rendered decks & workbooks */
+  .deliv { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-top: 1px dashed var(--line); }
+  .deliv:first-child { border-top: 0; }
+  .deliv .dfmt { flex: 0 0 auto; margin-top: 2px; background: var(--panel, #f4f6f8); color: var(--muted); white-space: nowrap; }
+  .deliv .dmain { flex: 1 1 auto; min-width: 0; font-size: 13px; }
+  .deliv .dload { flex: 0 0 auto; font-size: 12px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); text-decoration: none; display: inline-block; }
+  .deliv .dload:hover { border-color: var(--gold, #B8913B); }
+
   /* activity + chat */
   .activity { max-height: 320px; overflow-y: auto; }
   .act { font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -231,6 +239,7 @@
     <div class="card"><h2>Campaign Canvas</h2><div class="rail" id="rail"></div></div>
     <div class="card"><h2>Campaign</h2><div class="pad meta" id="meta"></div></div>
     <div class="card" id="figmaCard" style="display:none"><h2>Figma board</h2><div class="pad" id="figma"></div></div>
+    <div class="card" id="deliverablesCard" style="display:none"><h2>Deliverables</h2><div class="pad" id="deliverables"></div></div>
     <div class="card"><h2>Artifacts &amp; approvals</h2><div class="pad" id="artifacts"></div></div>
   </div>
 
@@ -861,7 +870,61 @@ function render(view) {
   }
 
   renderFigma(view);
+  renderDeliverables(view);
   renderSettings(view.viewer.canAdmin);
+}
+
+// ── Deliverables (§9): decks & workbooks rendered live from the campaign ──────
+let delivCacheKey = null;
+async function renderDeliverables(view) {
+  // Re-fetch only when the campaign, stage or artifact set changes (not every poll).
+  const key = `${current}·${view.campaign.currentStage}·${view.artifacts.length}·${currentRole}`;
+  if (key === delivCacheKey) return;
+  delivCacheKey = key;
+  const r = await api('GET', `/api/campaigns/${current}/deliverables`);
+  const card = $('deliverablesCard');
+  const available = (r.deliverables || []).filter(d => d.available);
+  if (!available.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const canEdit = view.viewer.canEdit;
+  $('deliverables').innerHTML = available.map(d => `
+    <div class="deliv">
+      <span class="chip dfmt">${d.format === 'pptx' ? 'Deck · PPTX' : 'Workbook · XLSX'}</span>
+      <div class="dmain">
+        <b>${esc(d.title)}</b>
+        <div class="cite">${esc(d.description)} · from ${d.sources.length} artifact${d.sources.length === 1 ? '' : 's'}</div>
+      </div>
+      <a class="ghost dload" href="/api/campaigns/${current}/deliverables/${d.key}" download>Download</a>
+      ${d.key === 'marcom-plan' && canEdit
+        ? `<label class="ghost dload" style="cursor:pointer">Re-ingest<input type="file" accept=".xlsx" style="display:none" onchange="ingestWorkbook(this)"></label>`
+        : ''}
+    </div>`).join('') +
+    `<div class="cite" style="margin-top:8px">Documents are rendered live from the campaign — always in sync. Each carries its lineage and is validated against the brand template before download.</div>`;
+}
+
+// Office round-trip (§9.5): preview the diff, confirm, then apply as your edit.
+async function ingestWorkbook(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const fileBase64 = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const preview = await api('POST', `/api/campaigns/${current}/deliverables/marcom-plan/ingest`, { fileBase64 });
+  if (preview && (preview.forbidden || preview.error)) { toast(preview.error || 'Not permitted.'); return; }
+  if (!preview.changes.length) { toast('No changes to the structured regions — nothing to reconcile.', true); return; }
+  const summary = preview.changes.map(c => `• ${c.summary}`).join('\n');
+  const notes = (preview.notes || []).filter(n => n.includes('confirm')).map(n => `\n⚠ ${n}`).join('');
+  if (!confirm(`Your workbook edits:\n\n${summary}${notes}\n\nApply these to the campaign? Each becomes a new version attributed to you, and the quality gates re-run.`)) return;
+  const applied = await api('POST', `/api/campaigns/${current}/deliverables/marcom-plan/ingest`, { fileBase64, apply: true });
+  if (applied && (applied.forbidden || applied.error)) { toast(applied.error || 'Could not apply.'); return; }
+  toast(`Reconciled ${applied.changes.length} change(s) from Excel — new versions are in review.`, true);
+  delivCacheKey = null;
+  if (applied.view) render(applied.view);
+  await loadPortfolio();
 }
 
 function afterAction(r) {

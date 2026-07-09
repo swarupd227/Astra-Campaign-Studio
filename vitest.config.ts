@@ -5,5 +5,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
+    // Lifecycle tests fold events on embedded Postgres and render Office
+    // deliverables in the §9.6 gate — comfortably slower under parallel load.
+    testTimeout: 20_000,
   },
 });

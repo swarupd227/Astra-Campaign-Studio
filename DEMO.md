@@ -55,6 +55,17 @@ next stage** unlocks (the stage gate needs an approved brief).
    > optimises the metric a human agreed, not one it invented."
 3. Switch to **Marketing Leader / CMO**, approve *Campaign strategy* (their sign-off),
    switch back, then use the **command rail**: type `approve all`, then `advance`.
+4. **The document moment (§9).** The **Deliverables** card now lists the *Marcom strategy*
+   deck and the *Marcom Plan* workbook — rendered live from the campaign object, brand
+   template validated, lineage embedded. Download the workbook, open it in Excel:
+   > "The screen is where you run the campaign. The deck and the workbook are what you
+   > circulate — and they are always in sync with the object, never an export."
+5. **The round-trip moment (§9.5).** In Excel, change a budget line (say paid-social
+   from 50% to 40% via the amount cell), save, and click **Re-ingest** on the Marcom
+   Plan row. The platform diffs the structured regions, shows exactly what you changed
+   — including a warning that the split no longer sums to 100% — and only applies on
+   your confirmation. The change lands as a new version, attributed to you, back
+   through the quality gates.
 
 ## Scene 3 · Content planning — Brand joins the loop
 

@@ -14,6 +14,9 @@ import { IntakeInterview, type CreateCampaignInput } from "./intakeInterview";
 import { NotificationService, TeamsIntakeBridge } from "./notifications";
 import { verifyTeamsSignature } from "../integrations/teams";
 import { assetSvg, handleClaudeDesignRpc } from "../integrations/claudeDesignDemo";
+import { listDeliverables, renderDeliverable } from "../rendering/deliverables";
+import { validateDeliverable } from "../rendering/conformance";
+import { changeToFields, diffMarcomPlan } from "../rendering/ingest";
 
 /**
  * Experience-layer API (spec §8) — a zero-dependency HTTP server exposing the
@@ -643,6 +646,66 @@ route("POST", "/api/campaigns/:id/reject", async (req, res, p, body) => {
   } catch (err) {
     json(res, 400, { error: (err as Error).message });
   }
+});
+
+// ── Deliverables (spec §9): rendered PPTX/XLSX views of the campaign object ──
+
+// The deliverable catalogue for this campaign — availability tracks stage progress.
+route("GET", "/api/campaigns/:id/deliverables", async (req, res, p) => {
+  const obj = await astra.repo.load(p.id!);
+  if (!obj) return json(res, 404, { error: "not found" });
+  json(res, 200, { deliverables: listDeliverables(obj) });
+});
+
+// Download: rendered on demand from the CURRENT object (in sync by construction),
+// validated against the brand template before it leaves the platform (§9.6).
+route("GET", "/api/campaigns/:id/deliverables/:key", async (req, res, p) => {
+  const obj = await astra.repo.load(p.id!);
+  if (!obj) return json(res, 404, { error: "not found" });
+  const rendered = await renderDeliverable(obj, p.key!);
+  if (!rendered) return json(res, 404, { error: `No deliverable "${p.key}" available yet.` });
+  const conformance = await validateDeliverable(rendered.format, rendered.buffer);
+  res.writeHead(200, {
+    "content-type": rendered.mime,
+    "content-length": rendered.buffer.length,
+    "content-disposition": `attachment; filename="${rendered.fileName}"`,
+    "x-astra-template-conformance": conformance.passed ? "pass" : "fail",
+  });
+  res.end(rendered.buffer);
+});
+
+// Office round-trip (§9.5): upload the edited Marcom Plan → diff structured
+// regions → confirm → apply as attributed human edits. Never a silent overwrite.
+route("POST", "/api/campaigns/:id/deliverables/marcom-plan/ingest", async (req, res, p, body) => {
+  const actor = actorFor(req);
+  const decision = astra.access.canEdit(actor.role);
+  if (!decision.allowed) return forbid(res, decision);
+  const b64 = typeof body.fileBase64 === "string" ? body.fileBase64 : "";
+  if (!b64) return json(res, 400, { error: "Attach the edited workbook (base64)." });
+  let report;
+  try {
+    report = await diffMarcomPlan((await astra.repo.load(p.id!))!, Buffer.from(b64, "base64"));
+  } catch {
+    return json(res, 400, { error: "That file could not be read as an Excel workbook (.xlsx)." });
+  }
+  if (body.apply !== true) return json(res, 200, { ...report, applied: false });
+
+  // Confirmed: each change becomes a human-authored version through the normal
+  // versioning + eval machinery, attributed to the uploader (§9.5 provenance).
+  const applied: string[] = [];
+  for (const change of report.changes) {
+    await astra.orchestrator.editArtifact(p.id!, change.artifactId, changeToFields(change), actor);
+    applied.push(change.summary);
+  }
+  if (applied.length) {
+    await notifier.notify(
+      p.id!,
+      "changes",
+      "Marcom Plan reconciled from Excel",
+      `${actor.displayName} edited the workbook offline — ${applied.join(" ")}`,
+    );
+  }
+  json(res, 200, { ...report, applied: true, view: await astra.canvas(p.id!, viewerRole(req)) });
 });
 
 // Inline edit → a human-authored new version that re-runs the quality gates.

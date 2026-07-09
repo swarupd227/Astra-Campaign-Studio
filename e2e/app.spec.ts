@@ -333,6 +333,20 @@ test.describe.serial("Astra Campaign Studio", () => {
     // Stays connected: the creation stage below now generates the hero through it.
   });
 
+  test("Deliverables: brand-templated decks render from the campaign object (§9)", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("#deliverablesCard")).toBeVisible();
+    await expect(page.locator("#deliverables")).toContainText("Campaign brief");
+    await expect(page.locator("#deliverables")).toContainText("always in sync");
+    // The download endpoint streams a PPTX validated against the brand template (§9.6).
+    const id = await page.evaluate("current"); // the SPA's selected-campaign binding
+    const res = await request.get(`/api/campaigns/${id}/deliverables/campaign-brief`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["x-astra-template-conformance"]).toBe("pass");
+    expect(res.headers()["content-disposition"]).toContain("astra-campaign-brief.pptx");
+    expect((await res.body()).length).toBeGreaterThan(10_000);
+  });
+
   test("Campaign Manager approves an item and the review queue shrinks (HITL)", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#actions")).toContainText("Signed in as Campaign Manager");

@@ -33,8 +33,8 @@ npm install
 npm run serve        # Campaign Canvas web UI at http://localhost:4000 (PORT to override)
 npm run walkthrough  # one campaign through ALL SEVEN ROLES in the terminal (no server needed)
 npm run demo         # runtime slice: brief → planning → content planning → creation → Figma board
-npm test             # 136 unit/integration tests (full chain, gates, HITL, go-live, rollback, eval tuning, RBAC, guests, mentions, grounding, connectors, Claude Design MCP, intake, safety, telemetry, Postgres)
-npm run e2e          # 23 Playwright browser scenarios, incl. the full chain: brief → go-live → rollback & readout → learnings
+npm test             # 146 unit/integration tests (full chain, gates, HITL, go-live, rollback, eval tuning, RBAC, guests, mentions, grounding, connectors, Claude Design MCP, deliverables & Office round-trip, intake, safety, telemetry, Postgres)
+npm run e2e          # 24 Playwright browser scenarios, incl. the full chain: brief → go-live → rollback & readout → learnings
 npm run demo:video   # records the captioned ~4-min product demo and renders demo/astra-demo.mp4 (needs ffmpeg)
 npm run typecheck
 ```
@@ -99,7 +99,8 @@ authenticates via an **OAuth sign-in**, not a static API key:
 | **MCP integration layer + Figma** — governed connectors; Figma is **token-optional** (live REST API when `FIGMA_TOKEN`+`FIGMA_FILE_KEY` or Admin-configured; mock board otherwise) | `src/integrations` | §10.1, §10.3 |
 | **Claude Design (Anthropic Labs)** — MCP-over-HTTP connector; discovers the server's design tools at connect time, governed like every connector. Ships with a **bundled local demo MCP server** (one-click connect, no credentials) through which the Image Generation Agent creates rendered hero artwork | `src/integrations` | §10.1 |
 | **Microsoft Teams / M365** — token-optional notifications (in-app feed always, Adaptive Cards to a Workflows webhook when configured, budgeted per §8.4) + an HMAC-verified inbound endpoint that runs the intake interview from a Teams channel / Copilot Studio | `src/integrations/teams.ts`, `src/experience/notifications.ts` | §6.0, §8.4, §10.2 |
-| **Experience layer** (Campaign Canvas UI, Mission Control, Review inbox, projections + API) | `src/experience` | §8 |
+| **Artifact rendering layer** — brand-templated **PowerPoint & Excel deliverables** generated live from the campaign object (Marcom strategy deck, Marcom Plan workbook, concept deck, Campaign Scope Brief, copy matrix, launch runbook, performance report), each with an embedded lineage sheet/slide; **Office round-trip**: edit the Marcom Plan in Excel, re-upload, and the platform diffs the structured regions and applies confirmed changes as attributed human versions; **template conformance is a quality gate** — generated files are validated (typography, palette, mandatory footer, lineage) before download and at the stage gate | `src/rendering`, `src/evals/templateConformance.ts` | §9, §9.5, §9.6 |
+| **Experience layer** (Campaign Canvas UI, Mission Control, Review inbox, Deliverables rail, projections + API) | `src/experience` | §8 |
 | **Role-based access** (persona catalogue, RACI authority, on-screen role switcher, enforced) | `src/security` | §5 |
 | **Content safety** — PII/secret redaction on outbound model prompts, injection defences on connector results and ingested docs, Trust & safety counters in the Admin console | `src/security/contentSafety.ts` | §9.5, §13, §14.1 |
 | **MVP-2: Roll-out** — 9 publishing agents, deployments as reviewable artifacts, **go-live** gated on approved deployments + a passing consent check, irreversible connector calls doubly enforced (Contentful, DAM, SFMC, ad networks, Jira as governed connectors) | `src/agents/rollout.ts`, `src/integrations/publishing.ts` | §6.4, §10.2 |

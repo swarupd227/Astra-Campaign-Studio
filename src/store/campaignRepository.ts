@@ -25,6 +25,9 @@ export class CampaignRepository {
     let campaign: CampaignObject["campaign"] | null = null;
     const artifacts: Record<string, Artifact> = {};
     const mentions: MentionRecord[] = [];
+    // Artifacts with ANY failed eval are gate-blocked: they stay "proposed" no
+    // matter how many other evals passed (§9.2 — the gate is all evals, not any).
+    const gateBlocked = new Set<string>();
 
     for (const event of events) {
       const b = event.body;
@@ -58,9 +61,13 @@ export class CampaignRepository {
 
         case "ArtifactEvaluated": {
           const a = artifacts[b.artifactId];
+          if (a && !b.passed) {
+            gateBlocked.add(b.artifactId);
+            if (a.status === ArtifactStatus.InReview) a.status = ArtifactStatus.Proposed;
+          }
           if (a && b.passed && !a.passedEvals.includes(b.evalId)) {
             a.passedEvals = [...a.passedEvals, b.evalId];
-            a.status = ArtifactStatus.InReview;
+            if (!gateBlocked.has(b.artifactId)) a.status = ArtifactStatus.InReview;
           }
           break;
         }

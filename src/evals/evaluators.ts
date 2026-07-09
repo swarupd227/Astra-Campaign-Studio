@@ -1,6 +1,7 @@
 import { Stage, type Artifact } from "../domain/types";
 import { EvalHarness, type Evaluator } from "./evalHarness";
 import { modelGradedEvaluator } from "./modelGraded";
+import { templateConformanceEvaluator } from "./templateConformance";
 
 /**
  * The MVP-1 evaluator set (spec §9.2). Objective dimensions (grounding presence,
@@ -177,9 +178,11 @@ export const regressionEvaluator: Evaluator = modelGradedEvaluator({
  */
 export function mvp1EvalHarness(): EvalHarness {
   return new EvalHarness({
-    [Stage.Intake]: [groundingEvaluator],
-    [Stage.CampaignPlanning]: [groundingEvaluator],
-    [Stage.ContentPlanning]: [groundingEvaluator, brandToneEvaluator],
+    // Template conformance (§9.6): stages that anchor rendered deliverables also
+    // validate the generated deck/workbook against the brand template.
+    [Stage.Intake]: [groundingEvaluator, templateConformanceEvaluator],
+    [Stage.CampaignPlanning]: [groundingEvaluator, templateConformanceEvaluator],
+    [Stage.ContentPlanning]: [groundingEvaluator, brandToneEvaluator, templateConformanceEvaluator],
     [Stage.ContentCreation]: [
       groundingEvaluator,
       brandToneEvaluator,
