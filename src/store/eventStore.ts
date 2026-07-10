@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { CampaignEvent, CampaignEventBody } from "../domain/events";
+import { EVENT_SCHEMA_VERSION, type CampaignEvent, type CampaignEventBody } from "../domain/events";
 import type { Actor } from "../domain/types";
 
 /**
@@ -52,6 +52,7 @@ abstract class BaseEventStore implements EventStore {
     const event: CampaignEvent = {
       seq: stream.length + 1,
       campaignId,
+      v: EVENT_SCHEMA_VERSION,
       at: this.now(),
       actor,
       body,

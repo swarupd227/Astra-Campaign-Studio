@@ -2,6 +2,19 @@ import { ArtifactKind, ArtifactStatus, Stage, type Artifact, type CampaignObject
 import { deliverableFileName, MIME, type LineageEntry } from "./brandTemplate";
 import { renderDeck, type DeckSpec } from "./deckRenderer";
 import { renderWorkbook, type WorkbookSpec } from "./workbookRenderer";
+import { assetSvg } from "../integrations/claudeDesignDemo";
+import { heroArtSvg } from "../integrations/designArt";
+
+/** Resolve an artifact's /assets/ image URL to its SVG (campaign artwork). */
+function artworkSvg(obj: CampaignObject): { svg: string; source: "hero-asset" | "storyboard-direction" } {
+  const hero = latest(obj, ArtifactKind.Asset, "Hero image");
+  const url = String(hero?.body.imageUrl ?? "");
+  const match = /^\/assets\/([a-z0-9@._-]+\.svg)$/i.exec(url);
+  const fromAsset = match ? assetSvg(match[1]!) : null;
+  return fromAsset
+    ? { svg: fromAsset, source: "hero-asset" }
+    : { svg: heroArtSvg(), source: "storyboard-direction" }; // pre-creation: the intended direction
+}
 
 /**
  * The deliverable catalogue (spec §9.4): every artifact exists simultaneously as
@@ -135,6 +148,7 @@ const CATALOGUE: DeliverableDef[] = [
         latest(obj, ArtifactKind.Messaging),
         latest(obj, ArtifactKind.CompetitiveInsight),
         latest(obj, ArtifactKind.Audience),
+        latest(obj, ArtifactKind.MediaPlan), // feeds the budget-split chart
       ].filter((a): a is Artifact => Boolean(a)),
     build: async (obj, sources) => {
       const strategy = sources.find((s) => s.kind === ArtifactKind.Strategy);
@@ -191,6 +205,25 @@ const CATALOGUE: DeliverableDef[] = [
             heading: "Competitive positioning",
             blocks: [{ kind: "kv", rows: competitive ? kvRows(competitive.body) : [] }],
           },
+          ...(() => {
+            const media = sources.find((s) => s.kind === ArtifactKind.MediaPlan);
+            const channels = (media?.body.channels ?? []) as { channel: string; budgetShare: number }[];
+            return channels.length
+              ? [
+                  {
+                    heading: "Channel & budget split",
+                    blocks: [
+                      {
+                        kind: "chart" as const,
+                        title: "Budget share",
+                        labels: channels.map((c) => humanKey(c.channel)),
+                        values: channels.map((c) => Math.round(c.budgetShare * 100)),
+                      },
+                    ],
+                  },
+                ]
+              : [];
+          })(),
         ],
         lineage: lineage(sources),
       };
@@ -277,6 +310,7 @@ const CATALOGUE: DeliverableDef[] = [
       const concept = sources.find((s) => s.kind === ArtifactKind.Concept);
       const storyboard = sources.find((s) => s.kind === ArtifactKind.Storyboard);
       const frames = (storyboard?.body.frames ?? []) as { beat: string; note: string }[];
+      const art = artworkSvg(obj);
       const spec: DeckSpec = {
         title: "Creative concept",
         subtitle: String(concept?.body.selected ?? obj.campaign.objective),
@@ -286,6 +320,19 @@ const CATALOGUE: DeliverableDef[] = [
             heading: "Hero storyboard",
             blocks: [
               { kind: "table", header: ["Beat", "Direction"], rows: frames.map((f) => [f.beat, f.note]) },
+            ],
+          },
+          {
+            heading: "Hero visual",
+            blocks: [
+              {
+                kind: "image",
+                svg: art.svg,
+                caption:
+                  art.source === "hero-asset"
+                    ? "The approved campaign hero, embedded from the creation stage."
+                    : "Visual direction for the hero — the creation stage produces the final asset.",
+              },
             ],
           },
         ],

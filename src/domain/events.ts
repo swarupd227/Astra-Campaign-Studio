@@ -102,12 +102,26 @@ export const CampaignEventBody = z.discriminatedUnion("type", [
 ]);
 export type CampaignEventBody = z.infer<typeof CampaignEventBody>;
 
+/**
+ * Current event-envelope schema version. Bump when the envelope or a body shape
+ * changes incompatibly; the fold upcasts older versions on read, so historical
+ * campaigns stay replayable forever (spec §11.2 "auditable and replayable").
+ */
+export const EVENT_SCHEMA_VERSION = 1;
+
 /** An envelope wrapping each event with ordering + provenance metadata. */
 export interface CampaignEvent {
   /** Monotonic per-campaign sequence number (1-based). */
   seq: number;
   campaignId: string;
+  /** Envelope schema version. Absent on pre-versioning events → treated as 1. */
+  v?: number;
   at: string;
   actor: { kind: "human" | "agent" | "system"; id: string; displayName: string; role?: string };
   body: CampaignEventBody;
+}
+
+/** The version an event was written under (legacy events predate the field). */
+export function eventVersion(e: CampaignEvent): number {
+  return e.v ?? 1;
 }

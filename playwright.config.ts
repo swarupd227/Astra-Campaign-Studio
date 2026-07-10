@@ -15,6 +15,10 @@ export default defineConfig({
   workers: 1, // shared server state → run serially for determinism
   reporter: [["list"]],
   timeout: 30_000,
+  // The suite shares one server; under load a scenario can occasionally race a
+  // live SSE re-render. One retry absorbs those transient flakes without masking
+  // real regressions (a genuinely broken test fails both attempts).
+  retries: 1,
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",

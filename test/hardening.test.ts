@@ -1,5 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { BodySchemas, firstIssue, RateLimiter } from "../src/experience/schemas";
+import { EVENT_SCHEMA_VERSION, eventVersion, type CampaignEvent } from "../src/domain/events";
+import { InMemoryEventStore } from "../src/store/eventStore";
+import { Stage, type Actor } from "../src/domain/types";
+
+const actor: Actor = { kind: "system", id: "t", displayName: "Test" };
+
+describe("event-log schema versioning (§11.2)", () => {
+  it("stamps every new event with the current schema version", async () => {
+    const store = new InMemoryEventStore(() => "2026-01-01T00:00:00Z");
+    const e = await store.append(
+      "c1",
+      { type: "StageGateBlocked", stage: Stage.Intake, reason: "test" },
+      actor,
+      -1,
+    );
+    expect(e.v).toBe(EVENT_SCHEMA_VERSION);
+    expect(eventVersion(e)).toBe(EVENT_SCHEMA_VERSION);
+  });
+
+  it("legacy events without a version fold as v1 (replayable forever)", () => {
+    const legacy = {
+      seq: 1,
+      campaignId: "c1",
+      at: "2025-01-01T00:00:00Z",
+      actor,
+      body: { type: "StageGateBlocked", stage: Stage.Intake, reason: "old" },
+    } as CampaignEvent;
+    expect(legacy.v).toBeUndefined();
+    expect(eventVersion(legacy)).toBe(1);
+  });
+});
 
 describe("API request validation (§14 hardening)", () => {
   it("rejects malformed bodies with a readable message", () => {

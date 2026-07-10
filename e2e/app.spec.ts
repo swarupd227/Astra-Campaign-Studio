@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 /**
  * End-to-end scenarios against the live Experience layer. These exercise the real
@@ -101,33 +102,38 @@ test.describe.serial("Astra Campaign Studio", () => {
 
   test("a Creator can edit content inline, creating a new version", async ({ page }) => {
     await page.goto("/");
+    // Own campaign, so the edit + diff assertions never race the shared campaign's
+    // other artifacts or a live re-render (fully deterministic).
+    await page.click("#newBtn");
+    await page.click("#wTabForm");
+    await page.fill("#wObjective", "Launch the TE 30 rotary hammer to renovation crews");
+    await page.click("#wFormPane button.approve");
+    await expect(page.locator("#wizard")).toBeHidden();
+    await expect(page.locator("#meta")).toContainText("TE 30");
     await page.selectOption("#roleSel", "creator");
-    // §8.2: the Asset Studio is the creator's home surface. The seeded campaign is
-    // still at intake, so the studio shows its empty state; the edit below happens
-    // on the canvas.
-    await expect(page.locator("#studioView")).toBeVisible();
-    await expect(page.locator("#studioIntro")).toContainText("No content to refine yet");
-    await page.click("#navCampaign");
     await expect(page.locator("#actions")).toContainText("Signed in as Creator");
+    await page.click("#navCampaign");
 
-    const editLink = page.locator("#artifacts .linkbtn", { hasText: "Edit" }).first();
-    await expect(editLink).toBeVisible();
-    await editLink.click();
-
-    const textarea = page.locator(".art.editing textarea").first();
-    await expect(textarea).toBeVisible();
-    await textarea.fill("Edited by the creator for the e2e test.");
-    await page.locator(".art.editing button.approve", { hasText: "Save changes" }).click();
-
+    // Edit ONE specific artifact end to end (the research pack — a Note with a
+    // plain-text field). Editing a Note doesn't trip the anchor deliverable gate.
+    const card = page.locator("#artifacts .art", { hasText: "Intake research pack" }).first();
+    await card.locator(".linkbtn", { hasText: "Edit" }).click();
+    const editor = page.locator('.art.editing[data-edit]');
+    await editor.locator('textarea[data-field="priorPerformance"]').fill("Edited by the creator for the e2e test.");
+    await editor.locator("button.approve", { hasText: "Save changes" }).click();
     await expect(page.locator("#toast")).toContainText("new version");
     // The prior version is retained as superseded — edit anything, lose nothing.
     await expect(page.locator("#artifacts")).toContainText("Superseded");
 
     // Diff-first editing (§8.4): the new version arrives as a reviewable word diff.
-    const editedCard = page.locator("#artifacts .art", { hasText: "Edited by the creator" }).first();
-    await editedCard.locator(".linkbtn", { hasText: "View changes" }).click();
-    await expect(editedCard.locator(".diffview ins").first()).toContainText("Edited");
-    await expect(editedCard.locator(".diffview del").first()).toBeVisible();
+    const edited = page.locator("#artifacts .art", { hasText: "Intake research pack" })
+      .filter({ hasText: "Edited by the creator for the e2e test." })
+      .first();
+    const viewChanges = edited.locator(".linkbtn", { hasText: "View changes" });
+    await expect(viewChanges).toBeVisible();
+    await viewChanges.click();
+    await expect(edited.locator(".diffview ins").first()).toContainText("Edited");
+    await expect(edited.locator(".diffview del").first()).toBeVisible();
   });
 
   test("Brand Guardian lens disables run/advance and hides intake approvals", async ({ page }) => {
@@ -259,6 +265,37 @@ test.describe.serial("Astra Campaign Studio", () => {
     await page.click("#settings button.ghost"); // "Use mock"
     await expect(page.locator("#toast")).toContainText("mock provider");
     await expect(page.locator("#settings")).toContainText("mock provider");
+  });
+
+  test("WCAG 2.2 AA: no serious/critical violations on any surface (§8.5)", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    await expect(page.locator("#rail .stage").first()).toBeVisible();
+    const surfaces = [
+      { name: "campaign-canvas", nav: "#navCampaign" },
+      { name: "asset-studio", nav: "#navStudio" },
+      { name: "portfolio", nav: "#navPortfolio" },
+      { name: "performance", nav: "#navPerformance" },
+      { name: "localisation", nav: "#navLocalisation" },
+    ];
+    const problems: string[] = [];
+    for (const s of surfaces) {
+      await page.click(s.nav);
+      await page.waitForTimeout(800);
+      const results = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+        .analyze();
+      for (const v of results.violations) {
+        if (v.impact !== "serious" && v.impact !== "critical") continue;
+        problems.push(
+          `${s.name}: [${v.impact}] ${v.id} — ${v.help} (${v.nodes.length} node(s): ${v.nodes
+            .slice(0, 3)
+            .map((n) => n.target.join(" "))
+            .join(" | ")})`,
+        );
+      }
+    }
+    expect(problems, problems.join("\n")).toEqual([]);
   });
 
   test("no page-level horizontal scrolling at any viewport", async ({ page }) => {

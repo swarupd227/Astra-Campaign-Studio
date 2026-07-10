@@ -18,7 +18,7 @@ import { z } from "zod";
 import { BodySchemas, firstIssue, RateLimiter } from "./schemas";
 import { listDeliverables, renderDeliverable } from "../rendering/deliverables";
 import { validateDeliverable } from "../rendering/conformance";
-import { changeToFields, diffMarcomPlan } from "../rendering/ingest";
+import { changeToFields, diffMarcomPlan, diffScopeBrief } from "../rendering/ingest";
 
 /**
  * Experience-layer API (spec §8) — a zero-dependency HTTP server exposing the
@@ -888,20 +888,27 @@ route("GET", "/api/campaigns/:id/deliverables/:key", async (req, res, p) => {
   res.end(rendered.buffer);
 });
 
-// Office round-trip (§9.5): upload the edited Marcom Plan → diff structured
+// Office round-trip (§9.5): upload the edited workbook/deck → diff structured
 // regions → confirm → apply as attributed human edits. Never a silent overwrite.
-route("POST", "/api/campaigns/:id/deliverables/marcom-plan/ingest", async (req, res, p, body) => {
+const INGESTERS: Record<string, { diff: typeof diffMarcomPlan; kind: string }> = {
+  "marcom-plan": { diff: diffMarcomPlan, kind: "an Excel workbook (.xlsx)" },
+  "scope-brief": { diff: diffScopeBrief, kind: "a PowerPoint deck (.pptx)" },
+};
+
+route("POST", "/api/campaigns/:id/deliverables/:key/ingest", async (req, res, p, body) => {
   const actor = actorFor(req);
   const decision = astra.access.canEdit(actor.role);
   if (!decision.allowed) return forbid(res, decision);
   if (!valid(BodySchemas.ingest, body, res)) return;
+  const ingester = INGESTERS[p.key!];
+  if (!ingester) return json(res, 404, { error: `"${p.key}" does not support round-trip ingestion.` });
   const b64 = typeof body.fileBase64 === "string" ? body.fileBase64 : "";
-  if (!b64) return json(res, 400, { error: "Attach the edited workbook (base64)." });
+  if (!b64) return json(res, 400, { error: "Attach the edited file (base64)." });
   let report;
   try {
-    report = await diffMarcomPlan((await astra.repo.load(p.id!))!, Buffer.from(b64, "base64"));
+    report = await ingester.diff((await astra.repo.load(p.id!))!, Buffer.from(b64, "base64"));
   } catch {
-    return json(res, 400, { error: "That file could not be read as an Excel workbook (.xlsx)." });
+    return json(res, 400, { error: `That file could not be read as ${ingester.kind}.` });
   }
   if (body.apply !== true) return json(res, 200, { ...report, applied: false });
 

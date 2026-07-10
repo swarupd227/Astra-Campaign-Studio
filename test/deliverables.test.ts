@@ -216,6 +216,83 @@ describe("Office round-trip ingestion (spec §9.5)", () => {
   });
 });
 
+describe("deliverable polish: artwork + chart + PPTX round-trip", () => {
+  it("the concept deck embeds the hero artwork as an image", async () => {
+    const astra = newAstra();
+    const id = await seed(astra);
+    await advanceTo(astra, id, Stage.ContentCreation);
+    const rendered = await renderDeliverable((await astra.repo.load(id))!, "concept-deck");
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(rendered!.buffer);
+    const media = Object.keys(zip.files).filter((f) => f.startsWith("ppt/media/"));
+    expect(media.length, "deck should embed artwork media").toBeGreaterThan(0);
+    const conformance = await validateDeck(rendered!.buffer);
+    expect(conformance.passed, JSON.stringify(conformance.checks)).toBe(true);
+  });
+
+  it("the strategy deck carries a native budget-split chart", async () => {
+    const astra = newAstra();
+    const id = await seed(astra);
+    await advanceTo(astra, id, Stage.ContentPlanning);
+    const rendered = await renderDeliverable((await astra.repo.load(id))!, "marcom-strategy");
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(rendered!.buffer);
+    const charts = Object.keys(zip.files).filter((f) => /^ppt\/charts\/chart\d+\.xml$/.test(f));
+    expect(charts.length, "deck should contain a chart part").toBeGreaterThan(0);
+    const chartXml = await zip.file(charts[0]!)!.async("string");
+    expect(chartXml).toContain("Paid social"); // channel labels feed the chart
+    const conformance = await validateDeck(rendered!.buffer);
+    expect(conformance.passed, JSON.stringify(conformance.checks)).toBe(true);
+  });
+
+  it("scope-brief PPTX round-trip: an edited tone note is diffed and applied (§9.5)", async () => {
+    const astra = newAstra();
+    const id = await seed(astra);
+    await advanceTo(astra, id, Stage.ContentCreation);
+    const rendered = await renderDeliverable((await astra.repo.load(id))!, "scope-brief");
+
+    // A Brand Guardian reworks the tone notes in PowerPoint.
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(rendered!.buffer);
+    let edited = false;
+    for (const name of Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))) {
+      const xml = await zip.file(name)!.async("string");
+      if (!xml.includes("Confident, expert, direct")) continue;
+      zip.file(name, xml.replace(/Confident, expert, direct\./, "Bold, direct, uncompromising."));
+      edited = true;
+    }
+    expect(edited, "the tone-notes cell should be editable in the deck").toBe(true);
+    const uploadedBuffer = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    const { diffScopeBrief } = await import("../src/rendering/ingest");
+    const report = await diffScopeBrief((await astra.repo.load(id))!, uploadedBuffer);
+    expect(report.reconciledSheets).toEqual(["Scope & mandatories"]);
+    expect(report.changes).toHaveLength(1);
+    expect(report.changes[0]!.field).toBe("toneNotes");
+    expect(String(report.changes[0]!.after)).toContain("Bold, direct, uncompromising");
+
+    // Confirmed → attributed human version through the gates; free-form untouched.
+    await astra.orchestrator.editArtifact(id, report.changes[0]!.artifactId, changeToFields(report.changes[0]!), human);
+    const obj = (await astra.repo.load(id))!;
+    const versions = Object.values(obj.artifacts).filter((a) => a.kind === ArtifactKind.CreativeBrief);
+    const latestBrief = versions.sort((a, b) => b.version - a.version)[0]!;
+    expect(latestBrief.author.id).toBe(human.id);
+    expect(String(latestBrief.body.toneNotes)).toContain("Bold, direct, uncompromising");
+    // The other structured fields survived the round-trip unchanged.
+    expect(latestBrief.body.channels).toEqual(["paid-social", "email", "landing-page"]);
+  });
+
+  it("an unedited scope brief produces zero changes", async () => {
+    const astra = newAstra();
+    const id = await seed(astra);
+    await advanceTo(astra, id, Stage.ContentCreation);
+    const rendered = await renderDeliverable((await astra.repo.load(id))!, "scope-brief");
+    const { diffScopeBrief } = await import("../src/rendering/ingest");
+    const report = await diffScopeBrief((await astra.repo.load(id))!, rendered!.buffer);
+    expect(report.changes).toHaveLength(0);
+  });
+});
+
 describe("brand constants", () => {
   it("footer names ARTIZENT and the product (no legacy branding)", () => {
     expect(BRAND.footer).toContain("ARTIZENT");

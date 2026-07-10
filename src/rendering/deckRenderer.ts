@@ -25,7 +25,20 @@ export interface DeckTable {
   header: string[];
   rows: string[][];
 }
-export type DeckBlock = DeckKv | DeckBullets | DeckTable;
+/** Embedded artwork (SVG) — decks carry the actual visual, not a file path. */
+export interface DeckImage {
+  kind: "image";
+  svg: string;
+  caption?: string;
+}
+/** Native chart — the budget split as a picture of the numbers, not a table. */
+export interface DeckChart {
+  kind: "chart";
+  title: string;
+  labels: string[];
+  values: number[];
+}
+export type DeckBlock = DeckKv | DeckBullets | DeckTable | DeckImage | DeckChart;
 
 export interface DeckSlide {
   heading: string;
@@ -106,7 +119,8 @@ function addContentSlide(pptx: pptxgen, slide: DeckSlide): void {
     const empty =
       (block.kind === "bullets" && block.items.length === 0) ||
       (block.kind === "kv" && block.rows.length === 0) ||
-      (block.kind === "table" && block.rows.length === 0);
+      (block.kind === "table" && block.rows.length === 0) ||
+      (block.kind === "chart" && block.values.length === 0);
     if (empty) {
       s.addText("— not yet produced —", {
         x: 0.5, y, w: 9.0, h: 0.3,
@@ -115,7 +129,30 @@ function addContentSlide(pptx: pptxgen, slide: DeckSlide): void {
       y += 0.44;
       continue;
     }
-    if (block.kind === "bullets") {
+    if (block.kind === "image") {
+      // Campaign art is authored at 1200×750 → 6.0" × 3.75" keeps the ratio and
+      // clears the footer keyline on a 16:9 slide.
+      s.addImage({
+        data: `image/svg+xml;base64,${Buffer.from(block.svg, "utf8").toString("base64")}`,
+        x: 1.7, y, w: 6.0, h: 3.75,
+      });
+      if (block.caption) {
+        s.addText(block.caption, {
+          x: 1.7, y: y + 3.8, w: 6.0, h: 0.3,
+          fontFace: BRAND.font, fontSize: 10, italic: true, color: BRAND.colors.muted, align: "center",
+        });
+      }
+      y += 4.2;
+    } else if (block.kind === "chart") {
+      s.addChart("doughnut", [{ name: block.title, labels: block.labels, values: block.values }], {
+        x: 0.9, y, w: 5.4, h: 3.6,
+        showLegend: true, legendPos: "r", legendFontFace: BRAND.font, legendFontSize: 11,
+        showTitle: false, holeSize: 60,
+        chartColors: [BRAND.colors.red, BRAND.colors.ink, BRAND.colors.gold, BRAND.colors.muted, "8FA6B8"],
+        dataLabelFontFace: BRAND.font,
+      });
+      y += 3.8;
+    } else if (block.kind === "bullets") {
       s.addText(
         block.items.map((t) => ({ text: t, options: { bullet: { code: "2022" }, breakLine: true } })),
         { x: 0.5, y, w: 9.0, h: 0.34 * block.items.length, fontFace: BRAND.font, fontSize: 13, color: BRAND.colors.ink },

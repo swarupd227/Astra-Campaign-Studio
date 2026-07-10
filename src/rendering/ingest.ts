@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { ArtifactKind, ArtifactStatus, type Artifact, type CampaignObject } from "../domain/types";
 
 /**
@@ -178,6 +179,76 @@ export async function diffMarcomPlan(obj: CampaignObject, uploaded: Buffer): Pro
 
   notes.push("Free-form sheets and formatting were preserved as authored (§9.5).");
   return { changes, reconciledSheets, notes };
+}
+
+// ── PPTX round-trip: the Campaign Scope Brief deck (§9.5) ─────────────────────
+
+const XML_ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'" };
+const decodeXml = (s: string): string => s.replace(/&(amp|lt|gt|quot|apos);/g, (m) => XML_ENTITIES[m]!);
+
+/** Extract the label→value pairs of the kv table on the slide containing `marker`. */
+async function pptxKvTable(uploaded: Buffer, marker: string): Promise<Record<string, string> | null> {
+  const zip = await JSZip.loadAsync(uploaded);
+  const slides = Object.keys(zip.files)
+    .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+    .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
+  for (const name of slides) {
+    const xml = await zip.file(name)!.async("string");
+    if (!xml.includes(marker)) continue;
+    const kv: Record<string, string> = {};
+    for (const tr of xml.match(/<a:tr[\s\S]*?<\/a:tr>/g) ?? []) {
+      const cells = (tr.match(/<a:tc[\s\S]*?<\/a:tc>/g) ?? []).map((tc) =>
+        // A cell's text may be split across runs (PowerPoint does this on edit);
+        // concatenate every <a:t> run inside the cell.
+        [...tc.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map((m) => m[1]!).join(""),
+      );
+      if (cells.length >= 2 && cells[0]!.trim()) kv[decodeXml(cells[0]!.trim())] = decodeXml(cells[1]!.trim());
+    }
+    return kv;
+  }
+  return null;
+}
+
+/**
+ * Diff an uploaded Campaign Scope Brief deck against the campaign object.
+ * Structured region: the "Scope & mandatories" kv table → CreativeBrief fields
+ * (tone notes, mandatory elements, channels). Free-form slides are preserved.
+ */
+export async function diffScopeBrief(obj: CampaignObject, uploaded: Buffer): Promise<IngestReport> {
+  const changes: IngestChange[] = [];
+  const notes: string[] = [];
+  const brief = latest(obj, ArtifactKind.CreativeBrief);
+  // Marker is the slide heading as it appears in the XML ("&" is entity-encoded).
+  const kv = await pptxKvTable(uploaded, "Scope &amp; mandatories");
+  if (!brief || !kv) {
+    return {
+      changes,
+      reconciledSheets: [],
+      notes: ['No "Scope & mandatories" table found — nothing to reconcile.'],
+    };
+  }
+
+  const compare = (label: string, field: string, current: unknown, isList: boolean) => {
+    if (!(label in kv)) return;
+    const after: unknown = isList ? kv[label]!.split(/;\s*/).map((s) => s.trim()).filter(Boolean) : kv[label]!;
+    const same = isList ? JSON.stringify(after) === JSON.stringify(current) : after === String(current ?? "");
+    if (same) return;
+    changes.push({
+      artifactId: brief.id,
+      artifactTitle: brief.title,
+      field,
+      before: current,
+      after,
+      summary: `${label} changed to “${isList ? (after as string[]).join("; ") : String(after)}”.`,
+    });
+  };
+
+  compare("Tone Notes", "toneNotes", brief.body.toneNotes, false);
+  compare("Mandatory Elements", "mandatoryElements", brief.body.mandatoryElements, true);
+  compare("Channels", "channels", brief.body.channels, true);
+
+  notes.push("Free-form slides were preserved as authored; only the scope table is reconciled (§9.5).");
+  return { changes, reconciledSheets: ["Scope & mandatories"], notes };
 }
 
 /** The body-field patch a confirmed change applies (used with orchestrator.editArtifact). */
