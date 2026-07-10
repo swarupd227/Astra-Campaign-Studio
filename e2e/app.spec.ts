@@ -368,6 +368,24 @@ test.describe.serial("Astra Campaign Studio", () => {
     await expect(page.locator("#artifacts .sla").first()).toContainText("Due");
   });
 
+  test("ops surface: /health responds and the SSE stream connects (§12.4)", async ({ page, request }) => {
+    const health = await request.get("/health");
+    expect(health.status()).toBe(200);
+    const h = await health.json();
+    expect(h.ok).toBe(true);
+    expect(h.campaigns).toBeGreaterThan(0);
+
+    await page.goto("/");
+    await expect(page.locator("#rail .stage").first()).toBeVisible();
+    const first = await page.evaluate(`new Promise((resolve, reject) => {
+      const es = new EventSource('/api/campaigns/' + current + '/stream');
+      const t = setTimeout(() => { es.close(); reject(new Error('no SSE event within 5s')); }, 5000);
+      es.onmessage = (e) => { clearTimeout(t); es.close(); resolve(e.data); };
+      es.onerror = () => { clearTimeout(t); es.close(); reject(new Error('SSE connection error')); };
+    })`);
+    expect(String(first)).toContain("connected");
+  });
+
   test("email intake: the interview runs on the mail thread (§6.0)", async ({ request }) => {
     const first = await request.post("/api/inbound/email", {
       data: {

@@ -1,5 +1,7 @@
 # Astra Campaign Studio
 
+[![CI](https://github.com/swarupd227/Astra-Campaign-Studio/actions/workflows/ci.yml/badge.svg)](https://github.com/swarupd227/Astra-Campaign-Studio/actions/workflows/ci.yml)
+
 The full-chain agentic campaign platform (spec §4.1): one runtime spine, built
 once, carrying a campaign from **brief intake through planning, content planning,
 creation, roll-out, campaign optimisation and content optimisation** — closed by
@@ -23,8 +25,8 @@ the learning loop (§6.7) that writes outcomes back into the knowledge fabric.
 > local — no external identity provider or cloud dependency. Grounding is real
 > vector retrieval: documents are chunked, embedded and indexed in **pgvector**
 > (embedded Postgres), with a runtime ingestion path in the Admin console. Proven
-> by an end-to-end demo, **68 unit/integration tests, and 16 Playwright browser
-> scenarios**.
+> by an end-to-end demo, **152 unit/integration tests, and 27 Playwright browser
+> scenarios**, all run in CI on every push.
 
 ## Quick start
 
@@ -57,6 +59,44 @@ model-graded evals, provide a key one of two ways:
 The key is held **in memory only** — never written to disk, never logged, never returned to
 the client (the status API only ever shows a masked `••••1234` hint). The gateway switches to
 routing through Claude the moment a key is set, and falls back to mock if it's cleared.
+
+### Demoing with a real key (runbook)
+
+The mock provider makes every flow deterministic — ideal for tests and offline
+demos. For a **live-reasoning demo**, switch to Claude and know what changes:
+
+1. Set the key (either `ANTHROPIC_API_KEY` at launch, or paste it in
+   **Admin settings** as Marketing Ops — held in memory only).
+2. The status line flips to *Claude via gateway*; from then on the
+   **model-graded evals** (brand-tone, compliance, localisation-equivalence,
+   regression), **intake extraction** and agent reasoning run on Claude
+   (default model: `claude-opus-4-8`, override with `ASTRA_DEFAULT_MODEL`).
+3. Expect stage runs to take noticeably longer than the mock (each artifact runs
+   several graded evals). The live activity stream now updates in real time over
+   SSE, so the audience watches agents land one by one.
+4. Cost control: `ASTRA_CAMPAIGN_TOKEN_BUDGET` caps tokens per campaign at the
+   gateway; spend shows in the canvas telemetry ("Tokens/item").
+5. Resilience: if a Claude call fails mid-demo, the gateway falls back to the
+   mock provider for that call — the demo never stalls.
+6. Dry-run first: `npm run walkthrough` with the key set exercises every stage
+   headlessly — a five-minute pre-demo confidence check.
+
+### Sandbox deployment (Docker)
+
+```bash
+docker compose up --build   # app + Postgres 16 → http://localhost:4000
+```
+
+The compose stack runs the app against a real Postgres (pgvector build) with a
+persistent volume; all integration credentials are optional env vars (see
+`docker-compose.yml`). `GET /health` reports liveness, persistence backend and
+campaign count — wired into the container healthcheck.
+
+The app publishes on **localhost only** by default. The persona switcher is not
+an authentication boundary, so exposing the port grants anyone who can reach it
+full admin capability — for a shared sandbox, opt in deliberately with
+`ASTRA_BIND=0.0.0.0` (and put a reverse proxy with auth in front for anything
+beyond a trusted network).
 
 ### Connecting Claude Design (Claude.ai Pro/Max/Team)
 

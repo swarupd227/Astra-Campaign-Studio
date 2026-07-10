@@ -1425,8 +1425,31 @@ async function renderNotifications() {
 }
 async function refresh() {
   if (current) render(await api('GET', `/api/campaigns/${current}`));
+  subscribeLive(); // (re)attach the live stream for the selected campaign
   await loadPortfolio();
   await renderNotifications();
+}
+
+// ── Live updates (SSE): the server ticks when the campaign changes; we re-fetch
+// through the role lens. Polling stays as the fallback transport.
+let eventSource = null, sseCampaign = null, sseTimer = null;
+function subscribeLive() {
+  if (!current || sseCampaign === current) return;
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  sseCampaign = current;
+  try {
+    eventSource = new EventSource(`/api/campaigns/${current}/stream`);
+    eventSource.onmessage = () => {
+      if (editing !== null) return; // never yank the canvas mid-edit
+      if (Object.values(mentionOpen).some(Boolean)) return;
+      clearTimeout(sseTimer);
+      sseTimer = setTimeout(() => { // coalesce bursts (agents landing one by one)
+        if (appView === 'campaign' || appView === 'studio') refresh();
+        else if (appView === 'performance') renderPerformance();
+        else if (appView === 'portfolio') renderPortfolio();
+      }, 250);
+    };
+  } catch { /* SSE unavailable → polling covers it */ }
 }
 async function runStage() { afterAction(await api('POST', `/api/campaigns/${current}/run-stage`)); await loadPortfolio(); }
 async function approve(id) { afterAction(await api('POST', `/api/campaigns/${current}/approve`, {artifactId:id})); await loadPortfolio(); }

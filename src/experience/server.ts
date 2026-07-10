@@ -14,6 +14,8 @@ import { IntakeInterview, type CreateCampaignInput } from "./intakeInterview";
 import { NotificationService, TeamsIntakeBridge } from "./notifications";
 import { verifyTeamsSignature } from "../integrations/teams";
 import { assetSvg, handleClaudeDesignRpc } from "../integrations/claudeDesignDemo";
+import { z } from "zod";
+import { BodySchemas, firstIssue, RateLimiter } from "./schemas";
 import { listDeliverables, renderDeliverable } from "../rendering/deliverables";
 import { validateDeliverable } from "../rendering/conformance";
 import { changeToFields, diffMarcomPlan } from "../rendering/ingest";
@@ -92,6 +94,7 @@ async function runStage(campaignId: string): Promise<void> {
     if (agent.name === figmaMappingAgent.name) continue;
     if (authored.has(agent.name)) continue; // idempotent: don't re-run an agent that already produced
     await astra.orchestrator.runAgent(campaignId, agent);
+    emitChanged(campaignId, "agent"); // live activity streams in as each agent lands
   }
 }
 
@@ -109,6 +112,7 @@ async function maybeCreateBoard(campaignId: string): Promise<void> {
   );
   if (!scopeBriefApproved) return;
   await astra.orchestrator.runAgent(campaignId, figmaBoardAgent);
+  emitChanged(campaignId, "board");
   await notifier.notify(
     campaignId,
     "created",
@@ -143,6 +147,7 @@ async function maybeAssembleBoard(campaignId: string): Promise<void> {
   if (board && Number((board.body as { filledFrames?: number }).filledFrames ?? 0) > 0) return;
 
   await astra.orchestrator.runAgent(campaignId, figmaMappingAgent);
+  emitChanged(campaignId, "board");
 }
 
 // ── tiny router ───────────────────────────────────────────────────────────────
@@ -164,7 +169,71 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(payload);
 }
 
+/**
+ * Validate a request body against its route schema (§14 hardening). Returns the
+ * parsed value, or responds 400 and returns null — call sites early-return.
+ */
+function valid<T>(schema: { safeParse(v: unknown): { success: boolean; data?: T; error?: z.ZodError } }, body: unknown, res: ServerResponse): T | null {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    json(res, 400, { error: `Invalid request: ${firstIssue(result.error!)}` });
+    return null;
+  }
+  return result.data as T;
+}
+
+// Public inbound entry points get a per-caller budget (§14): 10 requests/minute.
+const inboundLimiter = new RateLimiter(10, 60_000);
+function overInboundBudget(req: IncomingMessage, res: ServerResponse): boolean {
+  const key = req.socket.remoteAddress ?? "unknown";
+  if (inboundLimiter.allow(key)) return false;
+  json(res, 429, { error: "Too many requests — try again in a minute." });
+  return true;
+}
+
 // ── API routes ──────────────────────────────────────────────────────────────
+
+// Liveness/readiness for containers and monitors (§12.4 observability).
+route("GET", "/health", async (_req, res) => {
+  json(res, 200, {
+    ok: true,
+    uptimeSec: Math.round(process.uptime()),
+    persistence: process.env.DATABASE_URL ? "postgres" : "pglite",
+    campaigns: (await astra.store.listCampaigns()).length,
+  });
+});
+
+// ── Live updates (SSE) ────────────────────────────────────────────────────────
+// One event stream per campaign: the server ticks whenever the campaign object
+// changes (agent proposed, approval, advance, go-live…). The tick carries NO
+// content — clients re-fetch through their role lens, so authority still gates
+// everything they see. Polling remains as the fallback transport.
+const sseClients = new Map<string, Set<ServerResponse>>();
+
+function emitChanged(campaignId: string, what: string): void {
+  const clients = sseClients.get(campaignId);
+  if (!clients) return;
+  for (const client of clients) {
+    client.write(`data: ${JSON.stringify({ what })}\n\n`);
+  }
+}
+
+route("GET", "/api/campaigns/:id/stream", async (req, res, p) => {
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  res.write(`data: ${JSON.stringify({ what: "connected" })}\n\n`);
+  const set = sseClients.get(p.id!) ?? new Set<ServerResponse>();
+  set.add(res);
+  sseClients.set(p.id!, set);
+  const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 25_000);
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    set.delete(res);
+  });
+});
 
 // The persona catalogue that populates the on-screen role switcher (spec §5.1).
 route("GET", "/api/roles", async (_req, res) => {
@@ -283,6 +352,7 @@ route("POST", "/api/intake/:sid/reply", async (req, res, p, body) => {
   const actor = actorFor(req);
   const decision = astra.access.canCreateCampaign(actor.role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.intakeReply, body, res)) return;
   try {
     const reply = await interview.reply(p.sid!, String(body.text ?? ""), (input) => createCampaignFrom(input, actor));
     json(res, 200, reply);
@@ -295,7 +365,9 @@ route("POST", "/api/intake/:sid/reply", async (req, res, p, body) => {
 // same intake interview runs on the email content; replies thread via sessionId
 // (an email thread). A complete brief is taken as confirmed — email isn't a live
 // conversation — and the Campaign Manager still approves the brief in-app (RACI).
-route("POST", "/api/inbound/email", async (_req, res, _p, body) => {
+route("POST", "/api/inbound/email", async (req, res, _p, body) => {
+  if (overInboundBudget(req, res)) return;
+  if (!valid(BodySchemas.inboundEmail, body, res)) return;
   const from = String(body.from ?? "").trim();
   const subject = String(body.subject ?? "").trim();
   const text = String(body.body ?? "").trim();
@@ -332,6 +404,7 @@ route("POST", "/api/inbound/email", async (_req, res, _p, body) => {
 // Teams outgoing-webhook / Copilot Studio entry point (spec §6.0, §10.2). When a
 // shared secret is configured, the HMAC signature is verified against the raw body.
 route("POST", "/api/inbound/teams", async (req, res, _p, body) => {
+  if (overInboundBudget(req, res)) return;
   const secret = process.env.TEAMS_OUTGOING_SECRET;
   if (secret) {
     const raw = (body as { __raw?: string }).__raw ?? "";
@@ -355,6 +428,7 @@ route("GET", "/api/notifications", async (_req, res) => {
 route("POST", "/api/settings/teams", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.teams, body, res)) return;
   const webhookUrl = typeof body.webhookUrl === "string" ? body.webhookUrl.trim() : "";
   if (webhookUrl && !/^https:\/\//.test(webhookUrl)) {
     return json(res, 400, { error: "The Teams webhook URL must be https." });
@@ -374,6 +448,7 @@ route("GET", "/api/settings", async (req, res) => {
 route("POST", "/api/settings/anthropic-key", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.anthropicKey, body, res)) return;
   const key = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   if (key && key.length < 12) {
     return json(res, 400, { error: "That doesn't look like a valid API key." });
@@ -395,6 +470,7 @@ route("GET", "/api/admin/policy", async (req, res) => {
 route("POST", "/api/admin/policy", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.policy, body, res)) return;
   if (!isAutonomyLevel(body.autonomy)) return json(res, 400, { error: "Unknown autonomy level." });
   astra.policy.setAutonomy(String(body.role), body.stage as Stage, body.autonomy);
   json(res, 200, { rules: astra.policy.list().map((r) => ({ ...r, stageLabel: stageLabel(r.stage) })) });
@@ -410,6 +486,7 @@ route("GET", "/api/admin/golden", async (req, res) => {
 route("POST", "/api/admin/golden", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.golden, body, res)) return;
   const text = String(body.text ?? "").trim();
   if (!text) return json(res, 400, { error: "Text is required." });
   switch (String(body.op ?? "")) {
@@ -436,6 +513,7 @@ route("GET", "/api/admin/knowledge", async (req, res) => {
 route("POST", "/api/admin/knowledge", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.knowledge, body, res)) return;
   const title = String(body.title ?? "").trim();
   const text = String(body.text ?? "").trim();
   const domain = String(body.domain ?? "product");
@@ -474,6 +552,7 @@ route("GET", "/api/admin/agents", async (req, res) => {
 route("POST", "/api/settings/figma", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.figma, body, res)) return;
   const token = typeof body.token === "string" ? body.token.trim() : "";
   const fileKey = typeof body.fileKey === "string" ? body.fileKey.trim() : "";
   if (token && !fileKey) return json(res, 400, { error: "A Figma file key is required with the token." });
@@ -510,6 +589,7 @@ route("GET", "/assets/:file", async (_req, res, p) => {
 route("POST", "/api/settings/sfmc", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.sfmc, body, res)) return;
   const subdomain = typeof body.subdomain === "string" ? body.subdomain.trim() : "";
   const clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
   const clientSecret = typeof body.clientSecret === "string" ? body.clientSecret.trim() : "";
@@ -524,6 +604,7 @@ route("POST", "/api/settings/sfmc", async (req, res, _p, body) => {
 route("POST", "/api/settings/claude-design", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.claudeDesign, body, res)) return;
   const token = typeof body.token === "string" ? body.token.trim() : "";
   const endpoint = typeof body.endpoint === "string" ? body.endpoint.trim() : "";
   try {
@@ -565,6 +646,7 @@ route("POST", "/api/campaigns", async (req, res, _p, body) => {
   const actor = actorFor(req);
   const decision = astra.access.canCreateCampaign(actor.role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.createCampaign, body, res)) return;
   // Accept the structured intake wizard fields (spec §6.0).
   const successMetric = typeof body.successMetric === "string" ? body.successMetric.trim() : "";
   const kpis = successMetric
@@ -617,9 +699,11 @@ route("POST", "/api/campaigns/:id/run-stage", async (req, res, p) => {
 });
 
 route("POST", "/api/campaigns/:id/approve", async (req, res, p, body) => {
+  if (!valid(BodySchemas.approve, body, res)) return;
   try {
     // Authority is enforced in the orchestrator via the role-carrying actor.
     await astra.orchestrator.approve(p.id!, String(body.artifactId), actorFor(req), body.note);
+    emitChanged(p.id!, "approved");
     await maybeCreateBoard(p.id!); // §11.3 Phase 1: board on Scope Brief approval
     await maybeAssembleBoard(p.id!); // §11.3 Phase 2: populate once sources are approved
     await maybeHarvestLearning(p.id!, String(body.artifactId)); // §6.7 learning loop
@@ -659,6 +743,7 @@ route("GET", "/api/admin/guest-access", async (req, res) => {
 route("POST", "/api/admin/guest-access", async (req, res, _p, body) => {
   const decision = astra.access.canAdmin(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.guestAccess, body, res)) return;
   const campaignId = String(body.campaignId ?? "");
   if (!campaignId) return json(res, 400, { error: "campaignId is required." });
   if (body.allowed) astra.guests.assign(campaignId);
@@ -685,6 +770,7 @@ route("POST", "/api/campaigns/:id/refresh-metrics", async (req, res, p) => {
 
 // Roll back an applied optimisation action (spec §6.5 — reversible, human-initiated).
 route("POST", "/api/campaigns/:id/rollback", async (req, res, p, body) => {
+  if (!valid(BodySchemas.rollback, body, res)) return;
   const actor = actorFor(req);
   try {
     const rollback = await astra.rollbackAction(
@@ -693,6 +779,7 @@ route("POST", "/api/campaigns/:id/rollback", async (req, res, p, body) => {
       actor,
       String(body.reason ?? "Rolled back by the reviewer."),
     );
+    emitChanged(p.id!, "rollback");
     await notifier.notify(
       p.id!,
       "changes",
@@ -708,9 +795,11 @@ route("POST", "/api/campaigns/:id/rollback", async (req, res, p, body) => {
 
 // @mentions / hand-offs (spec §8.4): pull a persona into an artifact or decision.
 route("POST", "/api/campaigns/:id/mention", async (req, res, p, body) => {
+  if (!valid(BodySchemas.mention, body, res)) return;
   const actor = actorFor(req);
   try {
     await astra.addMention(p.id!, String(body.artifactId), String(body.toRole), String(body.message ?? ""), actor);
+    emitChanged(p.id!, "mention");
     const obj = await astra.repo.load(p.id!);
     const artifactTitle = obj?.artifacts[String(body.artifactId)]?.title ?? "an item";
     const toLabel = getRole(String(body.toRole))?.label ?? String(body.toRole);
@@ -729,6 +818,7 @@ route("POST", "/api/campaigns/:id/mention", async (req, res, p, body) => {
 route("POST", "/api/campaigns/:id/mention/:mid/resolve", async (req, res, p) => {
   try {
     await astra.resolveMention(p.id!, p.mid!, actorFor(req));
+    emitChanged(p.id!, "mention");
     json(res, 200, await astra.canvas(p.id!, viewerRole(req)));
   } catch (err) {
     json(res, 400, { error: (err as Error).message });
@@ -742,6 +832,7 @@ route("POST", "/api/campaigns/:id/golive", async (req, res, p) => {
   if (!decision.allowed) return forbid(res, decision);
   try {
     const { executed } = await astra.goLive(p.id!, actor);
+    emitChanged(p.id!, "live");
     await notifier.notify(
       p.id!,
       "golive",
@@ -755,6 +846,7 @@ route("POST", "/api/campaigns/:id/golive", async (req, res, p) => {
 });
 
 route("POST", "/api/campaigns/:id/reject", async (req, res, p, body) => {
+  if (!valid(BodySchemas.reject, body, res)) return;
   // Requesting changes needs the same authority as approving (a reviewer action).
   const obj = await astra.repo.load(p.id!);
   const artifact = obj?.artifacts[String(body.artifactId)];
@@ -802,6 +894,7 @@ route("POST", "/api/campaigns/:id/deliverables/marcom-plan/ingest", async (req, 
   const actor = actorFor(req);
   const decision = astra.access.canEdit(actor.role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.ingest, body, res)) return;
   const b64 = typeof body.fileBase64 === "string" ? body.fileBase64 : "";
   if (!b64) return json(res, 400, { error: "Attach the edited workbook (base64)." });
   let report;
@@ -820,6 +913,7 @@ route("POST", "/api/campaigns/:id/deliverables/marcom-plan/ingest", async (req, 
     applied.push(change.summary);
   }
   if (applied.length) {
+    emitChanged(p.id!, "reconciled");
     await notifier.notify(
       p.id!,
       "changes",
@@ -835,9 +929,11 @@ route("POST", "/api/campaigns/:id/edit", async (req, res, p, body) => {
   const actor = actorFor(req);
   const decision = astra.access.canEdit(actor.role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.edit, body, res)) return;
   const fields = body.fields && typeof body.fields === "object" ? body.fields : {};
   try {
     const result = await astra.orchestrator.editArtifact(p.id!, String(body.artifactId), fields, actor);
+    emitChanged(p.id!, "edited");
     json(res, 200, {
       blocked: result.pendingHumanApproval === false && !result.autoApproved,
       reason: result.reason,
@@ -850,6 +946,7 @@ route("POST", "/api/campaigns/:id/edit", async (req, res, p, body) => {
 
 // Request changes → record the feedback, then redraft with the producing agent.
 route("POST", "/api/campaigns/:id/revise", async (req, res, p, body) => {
+  if (!valid(BodySchemas.revise, body, res)) return;
   const actor = actorFor(req);
   const obj = await astra.repo.load(p.id!);
   const artifact = obj?.artifacts[String(body.artifactId)];
@@ -866,6 +963,7 @@ route("POST", "/api/campaigns/:id/revise", async (req, res, p, body) => {
       // Re-run the same agent with the feedback folded in; new draft supersedes the old.
       await astra.orchestrator.runAgent(p.id!, agent, { feedback, supersedes: artifact.id });
     }
+    emitChanged(p.id!, "changes");
     await notifier.notify(
       p.id!,
       "changes",
@@ -885,6 +983,7 @@ route("POST", "/api/campaigns/:id/advance", async (req, res, p) => {
   if (!decision.allowed) return forbid(res, decision);
   const advanced = await astra.orchestrator.advanceStage(p.id!, actor);
   if (advanced) {
+    emitChanged(p.id!, "advanced");
     const obj = await astra.repo.load(p.id!);
     await notifier.notify(
       p.id!,
@@ -902,6 +1001,7 @@ route("POST", "/api/campaigns/:id/advance", async (req, res, p) => {
 route("POST", "/api/campaigns/:id/figma-edit", async (req, res, p, body) => {
   const decision = astra.access.canRunAgents(actorFor(req).role);
   if (!decision.allowed) return forbid(res, decision);
+  if (!valid(BodySchemas.figmaEdit, body, res)) return;
   try {
     if (astra.figmaStatus().mode === "mock") {
       astra.figma.simulateDesignerEdit(p.id!, body.frame as FigmaFrame, String(body.content ?? ""));
@@ -915,6 +1015,7 @@ route("POST", "/api/campaigns/:id/figma-edit", async (req, res, p, body) => {
 
 // Conversational rail (spec §8.4): a few natural commands routed to the orchestrator.
 route("POST", "/api/campaigns/:id/command", async (req, res, p, body) => {
+  if (!valid(BodySchemas.command, body, res)) return;
   const actor = actorFor(req);
   const text = String(body.text ?? "").toLowerCase();
   let reply = "";
@@ -974,6 +1075,7 @@ route("POST", "/api/campaigns/:id/command", async (req, res, p, body) => {
     reply =
       "Try: “run stage”, “approve all”, “advance”, “status” — or instruct me, e.g. “add a LinkedIn variant for the DACH market”.";
   }
+  emitChanged(p.id!, "command");
   json(res, 200, { reply, view: await astra.canvas(p.id!, actor.role) });
 });
 
@@ -1045,9 +1147,16 @@ if (process.env.CLAUDE_DESIGN_TOKEN) {
     .then((s) => console.log(`  Claude Design connected: ${s.serverName} (${s.tools.length} tools)`))
     .catch((err) => console.warn(`  Claude Design connect failed: ${(err as Error).message}`));
 }
-seedIfEmpty().then(() => {
-  server.listen(PORT, () => {
-    console.log(`\n  Astra Campaign Studio — Experience layer`);
-    console.log(`  ▸ open  http://localhost:${PORT}\n`);
+seedIfEmpty()
+  .catch((err) => {
+    // Boot must be loud about seed failures (e.g. Postgres without pgvector) —
+    // a silent half-seeded state is far worse than a clear startup error.
+    console.error(`  Seed failed: ${(err as Error).message}`);
+    throw err;
+  })
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`\n  Astra Campaign Studio — Experience layer`);
+      console.log(`  ▸ open  http://localhost:${PORT}\n`);
+    });
   });
-});

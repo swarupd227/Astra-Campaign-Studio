@@ -1,0 +1,43 @@
+# Astra Campaign Studio — sandbox stack: the app + a real Postgres 16.
+# `docker compose up` → http://localhost:4000
+services:
+  app:
+    build: .
+    ports:
+      # Loopback by default: the role switcher is not an authentication boundary,
+      # so publishing beyond localhost grants anyone on the LAN full admin. For a
+      # shared sandbox, opt in explicitly: ASTRA_BIND=0.0.0.0 docker compose up
+      - "${ASTRA_BIND:-127.0.0.1}:${ASTRA_PORT:-4000}:4000"
+    environment:
+      DATABASE_URL: postgres://astra:astra@db:5432/astra
+      # Optional live integrations (all token-optional; blank = local mocks):
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FIGMA_TOKEN: ${FIGMA_TOKEN:-}
+      FIGMA_FILE_KEY: ${FIGMA_FILE_KEY:-}
+      SFMC_SUBDOMAIN: ${SFMC_SUBDOMAIN:-}
+      SFMC_CLIENT_ID: ${SFMC_CLIENT_ID:-}
+      SFMC_CLIENT_SECRET: ${SFMC_CLIENT_SECRET:-}
+      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    # pgvector build — the knowledge fabric indexes embeddings in Postgres (§9.3).
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: astra
+      POSTGRES_PASSWORD: astra
+      POSTGRES_DB: astra
+    volumes:
+      - astra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astra -d astra"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  astra-pgdata:

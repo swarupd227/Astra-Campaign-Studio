@@ -1,0 +1,17 @@
+node_modules
+.git
+.data
+.data-e2e
+.data-demo
+test-results
+test-results-demo
+playwright-report
+demo
+e2e
+test
+scripts
+.github
+.claude
+*.md
+.env
+.env.local
